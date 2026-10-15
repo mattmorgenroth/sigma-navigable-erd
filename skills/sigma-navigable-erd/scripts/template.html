@@ -339,10 +339,9 @@ function renderStats(){
 }
 function setRecs(open,save){
  $('rbody').hidden=!open;$('rtoggle').setAttribute('aria-expanded',open?'true':'false');
- if(save){try{localStorage.setItem('recsOpen',open?'1':'0')}catch(e){}}
 }
 renderStats();
-var wasOpen=false;try{wasOpen=localStorage.getItem('recsOpen')==='1'}catch(e){}
+var wasOpen=false;
 setRecs(wasOpen,false);
 $('rtoggle').addEventListener('click',function(){setRecs($('rbody').hidden,true)});
 /* ---- performance outlook ---- */
@@ -362,10 +361,9 @@ function renderPerf(){
 }
 function setPerf(open,save){
  $('pbody').hidden=!open;$('ptoggle').setAttribute('aria-expanded',open?'true':'false');
- if(save){try{localStorage.setItem('perfOpen',open?'1':'0')}catch(e){}}
 }
 renderPerf();
-var perfWasOpen=false;try{perfWasOpen=localStorage.getItem('perfOpen')==='1'}catch(e){}
+var perfWasOpen=false;
 setPerf(perfWasOpen,false);
 $('ptoggle').addEventListener('click',function(){setPerf($('pbody').hidden,true)});
 $('ptop').addEventListener('click',function(ev){var c=ev.target.closest('button[data-ri]');if(c){var rr=recById(c.getAttribute('data-ri'));focusNode(rr.n[0],true,rr.i);$('trace').scrollIntoView({behavior:'smooth'})}});
