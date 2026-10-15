@@ -481,7 +481,7 @@ AGENTS.md                       instructions for coding agents working with this
 
 ```bash
 pip install -r skills/sigma-navigable-erd/requirements.txt
-python3 -m unittest discover -s tests -v     # 94 tests, no network
+python3 -m unittest discover -s tests -v     # 97 tests, no network
 python3 examples/offline_demo.py             # regenerate examples/sample-output/
 ```
 
