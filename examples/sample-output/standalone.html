@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<title>Navigable Entity Relationship Diagram</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: summary strip, object ERD (left to right), owner roster, then a searchable column-by-column blame table */
+:root{--bg:#f6f7f9;--fg:#1c2330;--mut:#5d6778;--line:#d5dae3;--card:#fff;--hl:#fff7e0;
+--dp:#2f5fb3;--dpf:#e6eefb;--cs:#0f7f78;--csf:#dff4f2;--mm:#a85d00;--mmf:#fdeccf;--un:#6b7280;--unf:#eceef2;--calc:#8a2be2;
+--sans:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161d;--fg:#e6e9ef;--mut:#9aa4b5;--line:#2c3442;--card:#1a202a;--hl:#3a3115;
+--dp:#8fb3f2;--dpf:#1b2a45;--cs:#6fd3cb;--csf:#143a37;--mm:#f1b45f;--mmf:#46310f;--un:#a3acba;--unf:#262c37;--calc:#c9a2f5;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12161d;--fg:#e6e9ef;--mut:#9aa4b5;--line:#2c3442;--card:#1a202a;--hl:#3a3115;
+--dp:#8fb3f2;--dpf:#1b2a45;--cs:#6fd3cb;--csf:#143a37;--mm:#f1b45f;--mmf:#46310f;--un:#a3acba;--unf:#262c37;--calc:#c9a2f5;color-scheme:dark}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);padding-inline:clamp(16px,4vw,48px);padding-block:28px 56px;line-height:1.5}
+main{max-width:1240px;margin:auto;display:grid;gap:34px}
+h1{font-size:1.9rem;margin:0 0 6px;text-wrap:balance;font-weight:600}h2{font-size:1.15rem;margin:0 0 10px;font-weight:600}
+p{margin:0 0 8px;max-width:74ch}.mut{color:var(--mut)}a{color:var(--dp)}
+.wbname{margin:0 0 8px;font-size:1rem;color:var(--mut)}.wbname b{color:var(--fg);font-weight:600}
+.sum{display:flex;flex-wrap:wrap;gap:10px 28px;margin-top:12px}.sum div{min-width:0}
+.sum b{display:block;font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums}.sum span{font-size:.78rem;color:var(--mut);letter-spacing:.05em;text-transform:uppercase}
+.leg{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0 12px;font-size:.85rem}.leg span{display:inline-flex;align-items:center;gap:6px}.leg i{width:14px;height:14px;border-radius:3px;border:1.5px solid}
+.sc{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--card);padding:12px}svg{min-width:860px;width:100%;height:auto;display:block}
+.n rect{stroke-width:1.5}.n.wb rect{fill:var(--mmf);stroke:var(--mm)}.n.dm rect{fill:var(--card);stroke:var(--mm)}
+.n.dp rect{fill:var(--dpf);stroke:var(--dp)}.n.cs rect{fill:var(--csf);stroke:var(--cs)}.n.un rect{fill:var(--unf);stroke:var(--un);stroke-dasharray:5 3}
+.t{font:600 13px var(--sans);fill:var(--fg)}.k{font:500 9.5px var(--sans);fill:var(--mut);letter-spacing:.08em}.s{font:11px var(--mono);fill:var(--mut)}.o{font:500 11.5px var(--sans);fill:var(--fg)}
+.e{fill:none;stroke-width:1.3;opacity:.55}.e.m{stroke:var(--mm)}.e.t{stroke:var(--dp);stroke-dasharray:4 3}
+table{border-collapse:collapse;width:100%;font-size:.86rem}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);font-weight:600;position:sticky;top:0;background:var(--bg)}
+td.n{font-variant-numeric:tabular-nums}.tw{overflow-x:auto}.tw table{min-width:620px}
+.ctl{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:10px}.ctl label{display:grid;gap:3px;font-size:.74rem;color:var(--mut);letter-spacing:.05em;text-transform:uppercase;min-width:0}
+select,input[type=search]{font:inherit;font-size:.9rem;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);max-width:100%}
+.chk{display:flex;gap:6px;align-items:center;text-transform:none!important;letter-spacing:0!important;font-size:.88rem!important;color:var(--fg)!important}
+.bx{max-height:640px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.pill{display:inline-block;font-size:.7rem;font-weight:600;padding:1px 8px;border-radius:99px;border:1px solid;white-space:nowrap}
+.raw{color:var(--cs);border-color:var(--cs)}.calc{color:var(--calc);border-color:var(--calc)}.par{color:var(--mm);border-color:var(--mm)}
+.chip{display:inline-block;background:var(--unf);border-radius:4px;padding:0 6px;margin:1px 4px 1px 0;font-size:.8rem}.chip.me{background:var(--mmf)}
+td.m{font:11.5px var(--mono);color:var(--mut);word-break:break-word}
+details summary{cursor:pointer;color:var(--dp);font-size:.8rem}details pre{white-space:pre-wrap;font:11.5px var(--mono);margin:4px 0;color:var(--mut)}
+.gres{display:grid;gap:2px;max-height:260px;overflow:auto;margin-bottom:12px}
+.gres button{all:unset;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:6px 10px;border-radius:6px;border:1px solid transparent}
+.gres button:hover,.gres button:focus-visible{background:var(--card);border-color:var(--line)}.gres b{font-weight:600}.gres span{color:var(--mut);font-size:.82rem}
+.gbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.gbar>div{min-width:0}
+.btn{font:inherit;font-size:.85rem;padding:5px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);cursor:pointer}.btn:hover{border-color:var(--dp)}
+.gsc{overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--card);max-height:78vh}
+.gcv{position:relative}.gcv svg{position:absolute;inset:0;min-width:0;width:100%;height:100%}
+.gn{position:absolute;box-sizing:border-box;width:250px;border:1.5px solid var(--mm);border-radius:6px;background:var(--card);padding:6px 9px;display:flex;flex-direction:column;gap:1px;font-size:.78rem;line-height:1.3;overflow:hidden}
+.gn.meas{position:relative!important;height:auto!important;left:auto!important;top:auto!important;margin-bottom:6px}
+#gmeasure{position:absolute;left:-10000px;top:0;visibility:hidden;pointer-events:none}
+.gn.k1{border-color:var(--dp);background:var(--dpf)}.gn.k2{border-color:var(--un);background:var(--unf);border-style:dashed}.gn.k3{border-style:dashed;background:var(--mmf)}
+.gn.k4{border-color:var(--un);border-style:dashed;background:var(--unf)}.gn.dm{border-color:var(--cs)}.gn.me{outline:3px solid var(--mm);background:var(--hl)}
+.gn .c{font-weight:600;font-size:.84rem;white-space:normal;overflow-wrap:anywhere}.gn .l{color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.gn .w{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gn .a{display:flex;gap:12px;align-items:end;font-size:.78rem}
+.gn .a button{all:unset;cursor:pointer;color:var(--dp);text-decoration:underline}.gn .a a{color:var(--dp)}.gn .a .na{color:var(--mut)}
+.gp{fill:none;stroke:var(--mut);stroke-width:1.2;opacity:.6}
+.sech{margin:0 0 6px}
+.rtoggle{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:10px;font-size:1.15rem;font-weight:600;border-radius:6px}
+.rtoggle:focus-visible{outline:2px solid var(--dp);outline-offset:3px}
+.rtoggle .chev{width:.5em;height:.5em;border-right:2px solid var(--mut);border-bottom:2px solid var(--mut);transform:rotate(-45deg);transition:transform .15s}
+.rtoggle[aria-expanded="true"] .chev{transform:rotate(45deg)}
+@media (prefers-reduced-motion:reduce){.rtoggle .chev{transition:none}}
+.rwhy{margin:0 0 10px;max-width:80ch;font-size:.92rem}
+.rstats{display:grid;gap:10px;margin-bottom:12px}
+.rrow{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:baseline}
+.rstat b{font-size:1.4rem;font-weight:600;font-variant-numeric:tabular-nums;margin-right:6px}.rstat span{font-size:.78rem;color:var(--mut);letter-spacing:.05em;text-transform:uppercase}
+.rstat.hi b{color:#b3261e}.rstat.md b{color:var(--mm)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .rstat.hi b{color:#ff8a80}}
+:root[data-theme="dark"] .rstat.hi b{color:#ff8a80}
+.rlabel{font-size:.74rem;color:var(--mut);letter-spacing:.06em;text-transform:uppercase;margin-right:2px}
+.rlist{display:grid;gap:10px}.rc{border:1px solid var(--line);border-radius:8px;background:var(--card);padding:12px 14px;display:grid;gap:6px}
+.rc h3{margin:0;font-size:.95rem;font-weight:600;text-wrap:balance}.rc p{margin:0;max-width:90ch;font-size:.86rem}.rc .do{color:var(--fg)}.rc .do b{color:var(--cs)}
+.rc .meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:.78rem;color:var(--mut)}
+.sev-high{color:#b3261e;border-color:#b3261e}.sev-med{color:var(--mm);border-color:var(--mm)}.sev-low{color:var(--un);border-color:var(--un)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .sev-high{color:#ff8a80;border-color:#ff8a80}}
+:root[data-theme="dark"] .sev-high{color:#ff8a80;border-color:#ff8a80}
+.gn .flag{color:var(--mm);font-weight:600}.gn>*{flex:0 0 auto}.gn .a{margin-top:auto;padding-top:4px;white-space:nowrap;gap:10px}.gn .a>*{white-space:nowrap}
+.gn .role{font-weight:600;font-size:.74rem;color:var(--mm);white-space:normal}
+.gn .a .iso{color:var(--mm)}
+.grec{border:1.5px solid var(--mm);background:var(--mmf);border-radius:8px;padding:12px 14px;margin:6px 0 10px;display:grid;gap:6px}
+.grec h3{margin:0;font-size:1rem;font-weight:600;text-wrap:balance}.grec p{margin:0;font-size:.86rem;max-width:95ch}
+.grec .meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:.8rem;color:var(--mut)}
+.note{border:1px solid var(--mm);background:var(--mmf);padding:12px 16px;border-radius:8px;font-size:.88rem}.note ul{margin:4px 0 0;padding-left:20px}
+</style>
+<main>
+<header><h1>Navigable Entity Relationship Diagram</h1>
+<p class="wbname">Workbook: <b>Sales Performance Overview</b></p>
+<p class="lede">Where every column in this workbook comes from, where logic is applied to it, and who owns each layer. Pick an element below, or pick a person to see everything they are accountable for.</p>
+<p class="mut">Read from the Sigma API (workbook and data-model specs plus lineage). <a href="https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111">Open the workbook</a>.</p>
+<div class="sum"><div><b>5</b><span>Elements traced</span></div><div><b>38</b><span>Columns</span></div><div><b>19</b><span>Pass-through</span></div><div><b>19</b><span>Calculated</span></div><div><b>3</b><span>Sigma objects</span></div><div><b>7</b><span>Recommendations</span></div></div></header>
+
+<section id="trace"><h2>Trace a column</h2>
+<p class="mut">Search any column in the workbook or the models behind it. Selecting one draws every column that feeds it, with where each lives and who owns it.</p>
+<div class="ctl"><label style="flex:1 1 280px">Column name<input id="gq" type="search" placeholder="e.g. Deployed Pillars, Organization Uuid, Current Status"></label>
+<label>Search in<select id="gscope"><option value="wb">This workbook</option><option value="all">Workbook and data models</option></select></label></div>
+<div id="gres" class="gres"></div>
+<div id="gfocus" hidden>
+ <div class="gbar"><button id="gback" class="btn" type="button">&larr; Back</button><div id="ghead"></div></div>
+ <div id="grec" class="grec" hidden></div>
+ <p id="ginv" class="mut"></p>
+ <div class="gsc" id="gsc"><div id="gcv" class="gcv"><svg id="gsvg"></svg></div></div>
+</div></section>
+
+<section id="recs" class="sec">
+<h2 class="sech"><button id="rtoggle" class="rtoggle" type="button" aria-expanded="false" aria-controls="rbody"><span class="chev" aria-hidden="true"></span>Recommendations</button></h2>
+<p class="rwhy">Finds logic that is written more than once, in this workbook and in the data models behind it, so it can be consolidated or removed. Each finding names the cards that would have to change, who owns them, and what to check first. Open the section to filter the findings or to isolate the cards for one of them.</p>
+<div id="rstats" class="rstats"></div>
+<div id="rbody" hidden>
+<p class="mut">These are heuristics, so each finding says what to check before acting.</p>
+<div class="ctl"><label>Type<select id="rtype"><option value="">All</option><option value="lookup">Redundant lookup</option><option value="multi-lookup">Repeated lookups</option><option value="dup-formula">Same formula repeated</option><option value="dup-element">Near-duplicate elements</option><option value="dead-column">Unused hidden columns</option></select></label>
+<label>Impact<select id="rsev"><option value="">All</option><option value="high">High</option><option value="med">Medium</option><option value="low">Low</option></select></label>
+<label>Owner<select id="rwho"><option value="">Anyone</option><option>Alex Rivera</option><option>Priya Shah</option><option>Sam Okafor</option></select></label></div>
+<p id="rsum" class="mut"></p><div id="rlist" class="rlist"></div>
+</div></section>
+
+<section><h2>Object lineage</h2>
+<div class="leg"><span><i style="background:var(--mmf);border-color:var(--mm)"></i>Workbook</span><span><i style="background:var(--card);border-color:var(--mm)"></i>Data model</span><span><i style="background:var(--dpf);border-color:var(--dp)"></i>Warehouse source with an owner</span><span><i style="background:var(--unf);border-color:var(--un);border-style:dashed"></i>Owner not set</span></div>
+<div class="sc"><svg viewBox="0 0 970 220" role="img" aria-label="Object lineage"><path class="e m" d="M270,67.0 C315.0,67.0 315.0,67.0 360,67.0"/><path class="e m" d="M270,67.0 C315.0,67.0 315.0,163.0 360,163.0"/><path class="e t" d="M270,67.0 C350,67.0 620,67.0 700,67.0"><title>1 source(s)</title></path><path class="e t" d="M610,67.0 C690,67.0 620,67.0 700,67.0"><title>1 source(s)</title></path><path class="e t" d="M610,163.0 C690,163.0 620,67.0 700,67.0"><title>1 source(s)</title></path><g class="n wb"><rect x="20" y="30" width="250" height="74" rx="4"/><text x="30" y="46" class="k">WORKBOOK</text><text x="30" y="64" class="t">Sales Performance Overview</text><text x="30" y="80" class="o">owner Alex Rivera</text><text x="30" y="95" class="s">logic in 17 columns</text></g><g class="n dm"><rect x="360" y="30" width="250" height="74" rx="4"/><text x="370" y="46" class="k">DATA MODEL</text><text x="370" y="64" class="t">Customer Dimension</text><text x="370" y="80" class="o">owner Sam Okafor · last edit Jo Lindqvis</text><text x="370" y="95" class="s">logic in 2 columns</text></g><g class="n dm"><rect x="360" y="126" width="250" height="74" rx="4"/><text x="370" y="142" class="k">DATA MODEL</text><text x="370" y="160" class="t">Revenue Model</text><text x="370" y="176" class="o">owner Priya Shah</text><text x="370" y="191" class="s">logic in 2 columns</text></g><g class="n un"><rect x="700" y="30" width="250" height="74" rx="4"/><text x="710" y="46" class="k">WAREHOUSE / SOURCE</text><text x="710" y="66" class="t">Warehouse table (owner not set)</text><text x="710" y="84" class="s">3 source link(s)</text></g></svg></div></section>
+
+<section><h2>Who owns each object</h2>
+<div class="tw"><table><tr><th>Owner</th><th>Type</th><th>Object</th><th>Last editor</th><th>Columns with logic here</th></tr><tr><td>Alex Rivera</td><td>Workbook</td><td><a href="https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111">Sales Performance Overview</a></td><td>same</td><td class="n">17</td></tr><tr><td>Priya Shah</td><td>Data model</td><td><a href="https://app.sigmacomputing.com/acme/data-model/Revenue-Model-dmBBBB2222">Revenue Model</a></td><td>same</td><td class="n">2</td></tr><tr><td>Sam Okafor</td><td>Data model</td><td><a href="https://app.sigmacomputing.com/acme/data-model/Customer-Dimension-dmCCCC3333">Customer Dimension</a></td><td>Jo Lindqvist</td><td class="n">2</td></tr></table></div>
+<p class="mut" style="margin-top:8px">Warehouse tables have no owner in Sigma. They show an owner only if you mapped one in your owners file; otherwise they are marked "owner not set".</p></section>
+
+<section><h2>Column blame</h2>
+<div class="ctl">
+<label>Element<select id="el"></select></label>
+<label>Person<select id="who"><option value="">Anyone</option><option>Alex Rivera</option><option>Priya Shah</option><option>Sam Okafor</option></select></label>
+<label>Search columns<input id="q" type="search" placeholder="column or formula text"></label>
+<label class="chk"><input id="calc" type="checkbox" checked> Calculated only</label>
+<label class="chk"><input id="hid" type="checkbox"> Include hidden</label></div>
+<p id="inv" class="mut"></p>
+<div class="bx"><table><thead><tr><th>Column</th><th>Kind</th><th>Logic applied by</th><th>Origin</th></tr></thead><tbody id="rows"></tbody></table></div></section>
+
+<section class="note"><b>How to read the results</b><ul>
+<li><b>Pass-through</b> means the column is a plain reference all the way down. <b>Calculated</b> means at least one layer applies a formula, and that layer's owner is listed.</li>
+<li><b>Partial</b> means the chain reaches a data model whose upstream element the API does not expose. The model owner is listed, and "possible upstream" names the models behind it.</li>
+<li>Tracing matches columns by name through formulas, so treat an owner as the place to start asking, not as proof.</li><li>Ownership is Sigma object ownership (who owns the workbook or data model). It is not a statement about who is responsible for the business logic.</li></ul></section>
+</main>
+<script>
+var D=[{"n":"Customers","k":"table","c":[["Customer Id",0,1,0,["ANALYTICS.MARTS.CUSTOMERS.Customer Id"],["Warehouse table (owner not set)"],[],[],[],"[Customer Dimension/Customer Id]",2],["Name",0,1,0,["ANALYTICS.MARTS.CUSTOMERS.Name"],["Warehouse table (owner not set)"],[],[],[],"[Customer Dimension/Name]",5],["Segment",0,0,0,["ANALYTICS.MARTS.CUSTOMERS.Segment"],["Warehouse table (owner not set)"],[],[["Customer Dimension","Customer Dimension","Sam Okafor","If(IsNull([CUSTOMERS/Segment]), \"Unknown\", [CUSTOMERS/Segment])"]],["Sam Okafor"],"[Customer Dimension/Segment]",8],["Tier",0,1,0,["ANALYTICS.MARTS.CUSTOMERS.Tier"],["Warehouse table (owner not set)"],[],[],[],"[Customer Dimension/Tier]",11],["Country",0,1,0,["ANALYTICS.MARTS.CUSTOMERS.Country"],["Warehouse table (owner not set)"],[],[],[],"[Customer Dimension/Country]",14]]},{"n":"Orders by Customer","k":"table","c":[["Order Id",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Id"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Order Id]",16],["Order Date",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Date"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Order Date]",18],["Customer Id",0,1,0,["ANALYTICS.MARTS.ORDERS.Customer Id"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Customer Id]",20],["Amount",0,1,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Amount]",22],["Order Size",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders by Customer","Alex Rivera","If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))"]],["Alex Rivera"],"If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))",23],["Customer Segment",0,0,0,["ANALYTICS.MARTS.CUSTOMERS.Customer Id","ANALYTICS.MARTS.CUSTOMERS.Segment","ANALYTICS.MARTS.ORDERS.Customer Id"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders by Customer","Alex Rivera","Lookup([Customers/Segment], [Customer Id], [Customers/Customer Id])"],["Customer Dimension","Customer Dimension","Sam Okafor","If(IsNull([CUSTOMERS/Segment]), \"Unknown\", [CUSTOMERS/Segment])"]],["Alex Rivera","Sam Okafor"],"Lookup([Customers/Segment], [Customer Id], [Customers/Customer Id])",24],["Customer Name",0,0,0,["ANALYTICS.MARTS.CUSTOMERS.Customer Id","ANALYTICS.MARTS.CUSTOMERS.Name","ANALYTICS.MARTS.ORDERS.Customer Id"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders by Customer","Alex Rivera","Lookup([Customers/Name], [Customer Id], [Customers/Customer Id])"]],["Alex Rivera"],"Lookup([Customers/Name], [Customer Id], [Customers/Customer Id])",25],["Customer Tier",0,0,0,["ANALYTICS.MARTS.CUSTOMERS.Customer Id","ANALYTICS.MARTS.CUSTOMERS.Tier","ANALYTICS.MARTS.ORDERS.Customer Id"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders by Customer","Alex Rivera","Lookup([Customers/Tier], [Customer Id], [Customers/Customer Id])"]],["Alex Rivera"],"Lookup([Customers/Tier], [Customer Id], [Customers/Customer Id])",26],["Customer Country",0,0,0,["ANALYTICS.MARTS.CUSTOMERS.Country","ANALYTICS.MARTS.CUSTOMERS.Customer Id","ANALYTICS.MARTS.ORDERS.Customer Id"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders by Customer","Alex Rivera","Lookup([Customers/Country], [Customer Id], [Customers/Customer Id])"]],["Alex Rivera"],"Lookup([Customers/Country], [Customer Id], [Customers/Customer Id])",27],["Scratch",1,0,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders by Customer","Alex Rivera","[Amount] * 2"]],["Alex Rivera"],"[Amount] * 2",28]]},{"n":"Orders Export","k":"table","c":[["Order Id",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Id"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Order Id]",29],["Order Date",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Date"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Order Date]",30],["Amount",0,1,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Amount]",31],["Discount",0,1,0,["ANALYTICS.MARTS.ORDERS.Discount"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Discount]",33],["Cost",0,1,0,["ANALYTICS.MARTS.ORDERS.Cost"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Cost]",35],["Order Size",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export","Alex Rivera","If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))"]],["Alex Rivera"],"If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))",36],["Net Amount",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount","ANALYTICS.MARTS.ORDERS.Discount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export","Alex Rivera","[Amount] - [Discount]"]],["Alex Rivera"],"[Amount] - [Discount]",37],["Is Large",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export","Alex Rivera","[Amount] > 1000"]],["Alex Rivera"],"[Amount] > 1000",38],["Order Year",0,0,0,["ANALYTICS.MARTS.ORDERS.Order Date"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export","Alex Rivera","DateTrunc(\"year\", [Order Date])"]],["Alex Rivera"],"DateTrunc(\"year\", [Order Date])",39],["Margin",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount","ANALYTICS.MARTS.ORDERS.Cost"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export","Alex Rivera","([Amount] - [Cost]) / [Amount]"]],["Alex Rivera"],"([Amount] - [Cost]) / [Amount]",40]]},{"n":"Orders Export (copy)","k":"table","c":[["Order Id",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Id"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Order Id]",41],["Order Date",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Date"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Order Date]",42],["Amount",0,1,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Amount]",43],["Discount",0,1,0,["ANALYTICS.MARTS.ORDERS.Discount"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Discount]",44],["Cost",0,1,0,["ANALYTICS.MARTS.ORDERS.Cost"],["Warehouse table (owner not set)"],[],[],[],"[ORDERS/Cost]",45],["Order Size",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export (copy)","Alex Rivera","If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))"]],["Alex Rivera"],"If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))",46],["Net Amount",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount","ANALYTICS.MARTS.ORDERS.Discount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export (copy)","Alex Rivera","[Amount] - [Discount]"]],["Alex Rivera"],"[Amount] - [Discount]",47],["Is Large",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export (copy)","Alex Rivera","[Amount] > 1000"]],["Alex Rivera"],"[Amount] > 1000",48],["Order Year",0,0,0,["ANALYTICS.MARTS.ORDERS.Order Date"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export (copy)","Alex Rivera","DateTrunc(\"year\", [Order Date])"]],["Alex Rivera"],"DateTrunc(\"year\", [Order Date])",49],["Margin",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount","ANALYTICS.MARTS.ORDERS.Cost"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Orders Export (copy)","Alex Rivera","([Amount] - [Cost]) / [Amount]"]],["Alex Rivera"],"([Amount] - [Cost]) / [Amount]",50]]},{"n":"Revenue Summary","k":"table","c":[["Order Id",0,1,0,["ANALYTICS.MARTS.ORDERS.Order Id"],["Warehouse table (owner not set)"],[],[],[],"[Revenue/Order Id]",52],["Net Revenue",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount","ANALYTICS.MARTS.ORDERS.Discount"],["Warehouse table (owner not set)"],[],[["Revenue Model","Revenue","Priya Shah","[ORDERS/Amount] - [ORDERS/Discount]"]],["Priya Shah"],"[Revenue/Net Revenue]",54],["Revenue per Order",0,0,0,["ANALYTICS.MARTS.ORDERS.Amount","ANALYTICS.MARTS.ORDERS.Discount","ANALYTICS.MARTS.ORDERS.Order Id"],["Warehouse table (owner not set)"],[],[["Sales Performance Overview","Revenue Summary","Alex Rivera","Sum([Net Revenue]) / CountDistinct([Order Id])"],["Revenue Model","Revenue","Priya Shah","[ORDERS/Amount] - [ORDERS/Discount]"]],["Alex Rivera","Priya Shah"],"Sum([Net Revenue]) / CountDistinct([Order Id])",55]]}];
+var G={"S":["ANALYTICS.MARTS","CUSTOMERS","Customer Id","","Warehouse table (owner not set)","warehouse","Customer Dimension","[CUSTOMERS/Customer Id]","Sam Okafor","https://app.sigmacomputing.com/acme/data-model/Customer-Dimension-dmCCCC3333/edit?:nodeId=dCust","data-model","Sales Performance Overview","Customers","[Customer Dimension/Customer Id]","Alex Rivera","https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111/edit?:nodeId=eCust","workbook","Name","[CUSTOMERS/Name]","[Customer Dimension/Name]","Segment","If(IsNull([CUSTOMERS/Segment]), \"Unknown\", [CUSTOMERS/Segment])","[Customer Dimension/Segment]","Tier","[CUSTOMERS/Tier]","[Customer Dimension/Tier]","Country","[CUSTOMERS/Country]","[Customer Dimension/Country]","ORDERS","Order Id","Orders by Customer","[ORDERS/Order Id]","https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111/edit?:nodeId=eOrd","Order Date","[ORDERS/Order Date]","[ORDERS/Customer Id]","Amount","[ORDERS/Amount]","Order Size","If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))","Customer Segment","Lookup([Customers/Segment], [Customer Id], [Customers/Customer Id])","Customer Name","Lookup([Customers/Name], [Customer Id], [Customers/Customer Id])","Customer Tier","Lookup([Customers/Tier], [Customer Id], [Customers/Customer Id])","Customer Country","Lookup([Customers/Country], [Customer Id], [Customers/Customer Id])","Scratch","[Amount] * 2","Orders Export","https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111/edit?:nodeId=eExp","Discount","[ORDERS/Discount]","Cost","[ORDERS/Cost]","Net Amount","[Amount] - [Discount]","Is Large","[Amount] > 1000","Order Year","DateTrunc(\"year\", [Order Date])","Margin","([Amount] - [Cost]) / [Amount]","Orders Export (copy)","https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111/edit?:nodeId=eExp2","Revenue Model","Revenue","Priya Shah","https://app.sigmacomputing.com/acme/data-model/Revenue-Model-dmBBBB2222/edit?:nodeId=dRev","Revenue Summary","[Revenue/Order Id]","https://app.sigmacomputing.com/acme/workbook/Sales-Performance-Overview-wbAAAA1111/edit?:nodeId=eRev","Net Revenue","[ORDERS/Amount] - [ORDERS/Discount]","[Revenue/Net Revenue]","Revenue per Order","Sum([Net Revenue]) / CountDistinct([Order Id])","SEGMENT"],"N":[[1,0,1,2,1,3,4,-1,[],0,5],[0,6,6,2,1,7,8,9,[0],0,10],[0,11,12,2,1,13,14,15,[1],0,16],[1,0,1,17,1,3,4,-1,[],0,5],[0,6,6,17,1,18,8,9,[3],0,10],[0,11,12,17,1,19,14,15,[4],0,16],[1,0,1,20,1,3,4,-1,[],0,5],[0,6,6,20,0,21,8,9,[6],0,10],[0,11,12,20,1,22,14,15,[7],0,16],[1,0,1,23,1,3,4,-1,[],0,5],[0,6,6,23,1,24,8,9,[9],0,10],[0,11,12,23,1,25,14,15,[10],0,16],[1,0,1,26,1,3,4,-1,[],0,5],[0,6,6,26,1,27,8,9,[12],0,10],[0,11,12,26,1,28,14,15,[13],0,16],[1,0,29,30,1,3,4,-1,[],0,5],[0,11,31,30,1,32,14,33,[15],0,16],[1,0,29,34,1,3,4,-1,[],0,5],[0,11,31,34,1,35,14,33,[17],0,16],[1,0,29,2,1,3,4,-1,[],0,5],[0,11,31,2,1,36,14,33,[19],0,16],[1,0,29,37,1,3,4,-1,[],0,5],[0,11,31,37,1,38,14,33,[21],0,16],[0,11,31,39,0,40,14,33,[22],0,16],[0,11,31,41,0,42,14,33,[8,20,2],0,16],[0,11,31,43,0,44,14,33,[5,20,2],0,16],[0,11,31,45,0,46,14,33,[11,20,2],0,16],[0,11,31,47,0,48,14,33,[14,20,2],0,16],[0,11,31,49,0,50,14,33,[22],1,16],[0,11,51,30,1,32,14,52,[15],0,16],[0,11,51,34,1,35,14,52,[17],0,16],[0,11,51,37,1,38,14,52,[21],0,16],[1,0,29,53,1,3,4,-1,[],0,5],[0,11,51,53,1,54,14,52,[32],0,16],[1,0,29,55,1,3,4,-1,[],0,5],[0,11,51,55,1,56,14,52,[34],0,16],[0,11,51,39,0,40,14,52,[31],0,16],[0,11,51,57,0,58,14,52,[31,33],0,16],[0,11,51,59,0,60,14,52,[31],0,16],[0,11,51,61,0,62,14,52,[30],0,16],[0,11,51,63,0,64,14,52,[31,35],0,16],[0,11,65,30,1,32,14,66,[15],0,16],[0,11,65,34,1,35,14,66,[17],0,16],[0,11,65,37,1,38,14,66,[21],0,16],[0,11,65,53,1,54,14,66,[32],0,16],[0,11,65,55,1,56,14,66,[34],0,16],[0,11,65,39,0,40,14,66,[43],0,16],[0,11,65,57,0,58,14,66,[43,44],0,16],[0,11,65,59,0,60,14,66,[43],0,16],[0,11,65,61,0,62,14,66,[42],0,16],[0,11,65,63,0,64,14,66,[43,45],0,16],[0,67,68,30,1,32,69,70,[15],0,10],[0,11,71,30,1,72,14,73,[51],0,16],[0,67,68,74,0,75,69,70,[21,32],0,10],[0,11,71,74,1,76,14,73,[53],0,16],[0,11,71,77,0,78,14,73,[54,52],0,16],[1,0,29,79,1,3,4,-1,[],0,5]],"wb":"Sales Performance Overview"};
+var RC=[{"i":"r1","t":"dup-element","s":"high","h":"Orders Export and Orders Export (copy) repeat the same calculated columns","d":"Orders Export (Sales Performance Overview); Orders Export (copy) (Sales Performance Overview) share at least 5 calculated columns with identical formulas (at least 100% overlap). Filters, sorting and layout are not compared, so they may still differ.","a":"If the elements only differ by a filter, keep one and filter it with a control or a saved view. Otherwise move the shared calculated columns into one common source and point the others at it.","n":[38,40,37,48,50,47],"r":{"38":"Same logic in 1 other element","40":"Same logic in 1 other element","37":"Same logic in 1 other element","48":"Same logic in 1 other element","50":"Same logic in 1 other element","47":"Same logic in 1 other element"},"o":["Alex Rivera"],"w":["Orders Export (Sales Performance Overview)","Orders Export (copy) (Sales Performance Overview)"],"v":"1 redundant element"},{"i":"r2","t":"dup-formula","s":"med","h":"Same formula written 3 times ('Order Size')","d":"Identical logic appears in 3 elements: Orders by Customer (Sales Performance Overview), Orders Export (Sales Performance Overview), Orders Export (copy) (Sales Performance Overview). Formula: If([Amount] > 1000, \"Large\", If([Amount] > 100, \"Medium\", \"Small\"))","a":"Define it once in a shared upstream element or data model and reference it everywhere.","n":[23,36,46],"r":{"23":"Duplicate copy: reference one definition","36":"Duplicate copy: reference one definition","46":"Duplicate copy: reference one definition"},"o":["Alex Rivera"],"w":["Orders by Customer (Sales Performance Overview)","Orders Export (Sales Performance Overview)","Orders Export (copy) (Sales Performance Overview)"],"v":"3 copies \u2192 1"},{"i":"r3","t":"lookup","s":"med","h":"'Customer Segment' is looked up from Customers but already available upstream","d":"In Orders by Customer (Sales Performance Overview), 'Customer Segment' uses Lookup([Customers/Segment], \u2026). A column named 'SEGMENT' is already exposed by ORDERS (direct source); they trace to different source tables, so confirm the values match.","a":"Reference [ORDERS/SEGMENT] directly and delete the lookup column. Check that 'SEGMENT' is the same value for every row before removing it.","n":[24,56],"r":{"24":"Remove this lookup","56":"Use this column instead"},"o":["Alex Rivera"],"w":["Orders by Customer / Sales Performance Overview"],"v":"1 lookup"},{"i":"r4","t":"multi-lookup","s":"med","h":"4 lookups to Customers on the same key in Orders by Customer","d":"4 columns in Orders by Customer (Sales Performance Overview) each run Lookup against Customers using the same key (Customer Id, Customers/Customer Id). Values pulled: Country, Name, Segment, Tier.","a":"Join Customers once (or add it as a relationship) and reference its columns, replacing 4 lookups.","n":[24,25,26,27],"r":{"24":"Replace with a joined column","25":"Replace with a joined column","26":"Replace with a joined column","27":"Replace with a joined column"},"o":["Alex Rivera"],"w":["Orders by Customer / Sales Performance Overview"],"v":"4 lookups \u2192 1 join"},{"i":"r5","t":"dead-column","s":"low","h":"1 hidden calculated column in Orders by Customer is not used","d":"No formula, filter, sort, grouping or control in the workbook refers to: Scratch.","a":"Delete them. First check they are not used by an action, a saved view, or something outside this workbook.","n":[28],"r":{"28":"Unused: safe to delete after checking"},"o":["Alex Rivera"],"w":["Orders by Customer / Sales Performance Overview"],"v":"1 column"},{"i":"r6","t":"dup-formula","s":"low","h":"Same formula written 2 times ('Order Year')","d":"Identical logic appears in 2 elements: Orders Export (Sales Performance Overview), Orders Export (copy) (Sales Performance Overview). Formula: DateTrunc(\"year\", [Order Date])","a":"Define it once in a shared upstream element or data model and reference it everywhere.","n":[39,49],"r":{"39":"Duplicate copy: reference one definition","49":"Duplicate copy: reference one definition"},"o":["Alex Rivera"],"w":["Orders Export (Sales Performance Overview)","Orders Export (copy) (Sales Performance Overview)"],"v":"2 copies \u2192 1"},{"i":"r7","t":"dup-formula","s":"low","h":"Same formula written 2 times ('Margin')","d":"Identical logic appears in 2 elements: Orders Export (Sales Performance Overview), Orders Export (copy) (Sales Performance Overview). Formula: ([Amount] - [Cost]) / [Amount]","a":"Define it once in a shared upstream element or data model and reference it everywhere.","n":[40,50],"r":{"40":"Duplicate copy: reference one definition","50":"Duplicate copy: reference one definition"},"o":["Alex Rivera"],"w":["Orders Export (Sales Performance Overview)","Orders Export (copy) (Sales Performance Overview)"],"v":"2 copies \u2192 1"}];
+var $=function(i){return document.getElementById(i)};
+var el=$('el');D.forEach(function(e,i){var o=document.createElement('option');o.value=i;o.textContent=e.n+' ('+e.c.length+')';el.appendChild(o)});
+var ALL=document.createElement('option');ALL.value='all';ALL.textContent='All elements';el.insertBefore(ALL,el.firstChild);
+var wbOwner=null;
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function render(){
+ var who=$('who').value,q=$('q').value.toLowerCase(),co=$('calc').checked,hh=$('hid').checked,sel=el.value,out=[],ppl={},n=0,CAP=400;
+ D.forEach(function(e,i){
+  if(sel!=='all'&&String(i)!==sel)return;
+  e.c.forEach(function(c){
+   if(!hh&&c[1])return; if(co&&c[2])return;
+   var involved=c[8].concat(c[5],c[6]);
+   if(who&&!involved.some(function(x){return x.indexOf(who)===0}))return;
+   if(q&&(c[0]+' '+c[9]).toLowerCase().indexOf(q)<0)return;
+   c[8].forEach(function(o){ppl[o]=(ppl[o]||0)+1});
+   n++; if(out.length>=CAP)return;
+   var kind=c[2]?'<span class="pill raw">Pass-through</span>':'<span class="pill calc">Calculated</span>';
+   if(c[3])kind+=' <span class="pill par">Partial</span>';
+   var by=c[7].map(function(t){return '<div><span class="chip'+(t[2]===who?' me':'')+'">'+esc(t[2])+'</span>'+esc(t[0])+' / '+esc(t[1])+'<details><summary>formula</summary><pre>'+esc(t[3])+'</pre></details></div>'}).join('')||'<span class="mut">no logic applied</span>';
+   if(c[6].length)by+='<div class="mut">possible upstream: '+c[6].map(esc).join('; ')+'</div>';
+   var origin=c[4].concat(c[5].length?['team: '+c[5].join(', ')]:[]).map(esc).join('<br>');
+   out.push('<tr><td>'+esc(c[0])+(sel==='all'?'<div class="mut">'+esc(e.n)+'</div>':'')+(c[1]?' <span class="mut">(hidden)</span>':'')+(c[10]>=0?' <button class="btn" type="button" data-n="'+c[10]+'">Trace</button>':'')+'</td><td>'+kind+'</td><td>'+by+'</td><td class="m">'+origin+'</td></tr>');
+  });
+ });
+ $('rows').innerHTML=out.join('')||'<tr><td colspan="4" class="mut">No columns match.</td></tr>';
+ var names=Object.keys(ppl).sort(function(a,b){return ppl[b]-ppl[a]});
+ $('inv').innerHTML='<b>'+n+'</b> columns shown'+(n>CAP?' (first '+CAP+')':'')+'. People who own logic in this view: '+(names.map(function(p){return '<span class="chip">'+esc(p)+' · '+ppl[p]+'</span>'}).join('')||'none');
+}
+['el','who','q','calc','hid'].forEach(function(i){$(i).addEventListener(i==='q'?'input':'change',render)});
+el.value='all';render();
+$('rows').addEventListener('click',function(ev){var b=ev.target.closest('button[data-n]');if(b){focusNode(+b.getAttribute('data-n'),true);$('trace').scrollIntoView({behavior:'smooth'})}});
+
+/* ---- recommendations ---- */
+var TYPE={'lookup':'Redundant lookup','multi-lookup':'Repeated lookups','dup-formula':'Same formula repeated','dup-element':'Near-duplicate elements','dead-column':'Unused hidden columns'};
+var SEVL={high:'High',med:'Medium',low:'Low'};
+function renderRecs(){
+ var ty=$('rtype').value,sv_=$('rsev').value,who=$('rwho').value,out=[],n=0,CAP=60;
+ RC.forEach(function(r){
+  if(ty&&r.t!==ty)return; if(sv_&&r.s!==sv_)return; if(who&&r.o.indexOf(who)<0)return;
+  n++; if(out.length>=CAP)return;
+  out.push('<div class="rc"><div class="meta"><span class="pill sev-'+r.s+'">'+SEVL[r.s]+'</span><span>'+esc(TYPE[r.t]||r.t)+'</span><span>Saves: '+esc(r.v)+'</span></div>'
+   +'<h3>'+esc(r.h)+'</h3><p>'+esc(r.d)+'</p><p class="do"><b>Do:</b> '+esc(r.a)+'</p>'
+   +'<div class="meta">'+(r.o.length?'Involve: '+r.o.map(function(p){return '<span class="chip">'+esc(p)+'</span>'}).join(''):'')
+   +(r.n.length?'<button class="btn" type="button" data-ri="'+r.i+'">Show involved cards</button> ':'')+r.n.slice(0,2).map(function(i){return '<button class="btn" type="button" data-r="'+i+'">Trace '+esc(sv(NN[i][3]))+'</button>'}).join(' ')+'</div></div>');
+ });
+ $('rlist').innerHTML=out.join('')||'<p class="mut">No recommendations match.</p>';
+ var hi=RC.filter(function(r){return r.s==='high'}).length;
+ $('rsum').innerHTML='<b>'+n+'</b> shown of '+RC.length+' ('+hi+' high impact).'+(n>CAP?' Showing the first '+CAP+'.':'');
+}
+['rtype','rsev','rwho'].forEach(function(i){$(i).addEventListener('change',renderRecs)});
+$('rlist').addEventListener('click',function(ev){
+ var b=ev.target.closest('button[data-r]');if(b){focusNode(+b.getAttribute('data-r'),true);$('trace').scrollIntoView({behavior:'smooth'});return}
+ var c=ev.target.closest('button[data-ri]');if(c){var rr=recById(c.getAttribute('data-ri'));focusNode(rr.n[0],true,rr.i);$('trace').scrollIntoView({behavior:'smooth'})}});
+var RN={};RC.forEach(function(r){r.n.forEach(function(i){(RN[i]=RN[i]||[]).push(r)})});
+
+/* ---- single-column lineage ---- */
+var S=G.S,NN=G.N,KL=['column','warehouse','custom SQL','input table','hidden upstream','other','manual'];
+var NW=250,NH=98,GX=64,GY=14,hist=[];
+function sv(i){return i<0?'':S[i]}
+function isWb(n){return sv(n[10])==='workbook'}
+var low=NN.map(function(n){return sv(n[3]).toLowerCase()});
+function search(){
+ var q=$('gq').value.trim().toLowerCase(),sc=$('gscope').value,out=[];
+ if(!q){$('gres').innerHTML='';return}
+ NN.forEach(function(n,i){
+  if(n[0]!==0&&n[0]!==3)return; if(sc==='wb'&&!isWb(n))return;
+  var j=low[i].indexOf(q); if(j<0)return;
+  out.push([i,(low[i]===q?0:j===0?1:2)+(isWb(n)?0:.5),low[i].length]);
+ });
+ out.sort(function(a,b){return a[1]-b[1]||a[2]-b[2]});
+ var seen={},rows=[];
+ out.forEach(function(o){var n=NN[o[0]],k=sv(n[3])+'|'+sv(n[2])+'|'+sv(n[1]);if(seen[k])return;seen[k]=1;rows.push(o[0])});
+ var tot=rows.length;rows=rows.slice(0,60);
+ $('gres').innerHTML=rows.map(function(i){var n=NN[i];return '<button type="button" data-g="'+i+'"><b>'+esc(sv(n[3]))+'</b><span>'+esc(sv(n[2]))+' &middot; '+esc(sv(n[1]))+' &middot; '+(isWb(n)?'workbook':'data model')+(n[4]?'':' &middot; calculated')+'</span></button>'}).join('')||'<span class="mut">No column matches.</span>';
+ if(tot>60)$('gres').insertAdjacentHTML('beforeend','<span class="mut" style="padding:4px 10px">'+(tot-60)+' more. Keep typing to narrow.</span>');
+}
+$('gq').addEventListener('input',search);$('gscope').addEventListener('change',search);
+$('gres').addEventListener('click',function(ev){var b=ev.target.closest('button[data-g]');if(b)focusNode(+b.getAttribute('data-g'),true)});
+$('gback').addEventListener('click',function(){if(curRec){focusNode(hist[hist.length-1],false);return}if(hist.length>1){hist.pop();focusNode(hist[hist.length-1],false)}});
+$('gfocus').addEventListener('click',function(ev){
+ var a=ev.target.closest('button[data-rec]');
+ if(a){var i=+a.getAttribute('data-rec'),r=RN[i]&&RN[i][0];if(r)focusNode(i,false,r.i);return}
+ var b=ev.target.closest('button[data-iso]');
+ if(b){var id=b.getAttribute('data-iso');if(id==='off'){focusNode(hist[hist.length-1],false);return}
+  var rr=recById(id),cf=hist[hist.length-1];focusNode(rr.n.indexOf(cf)>=0?cf:rr.n[0],false,rr.i)}});
+$('gsc').addEventListener('click',function(ev){var b=ev.target.closest('button[data-f]');if(b)focusNode(+b.getAttribute('data-f'),true)});
+
+var curRec=null;
+function recById(id){return RC.filter(function(r){return r.i===id})[0]}
+// cards involved in a recommendation, plus short connector paths between them so the relationship stays visible
+function recSet(rec,f){
+ var S={},add={};rec.n.forEach(function(i){S[i]=1});S[f]=1;
+ function dfs(a,u,path,d){NN[u][8].forEach(function(p){
+  if(S[p]){if(p!==a)path.concat([u]).forEach(function(x){if(!S[x])add[x]=1})}
+  else if(d<4&&Object.keys(add).length<30)dfs(a,p,path.concat([u]),d+1)})}
+ Object.keys(S).forEach(function(a){dfs(+a,+a,[],0)});
+ return Object.keys(S).concat(Object.keys(add)).map(Number);
+}
+function focusNode(f,push,recId){
+ if(push&&hist[hist.length-1]!==f)hist.push(f);
+ $('gfocus').hidden=false;
+ var rec=recId?recById(recId):null;curRec=rec?rec.i:null;
+ var CAP=140,level={},depth={},cut={},order,inset={};
+ if(rec){order=recSet(rec,f)}
+ else{order=[f];depth[f]=0;for(var qi=0;qi<order.length;qi++){var u0=order[qi];
+  NN[u0][8].forEach(function(p){if(depth[p]===undefined){if(order.length>=CAP){cut[u0]=(cut[u0]||0)+1;return}depth[p]=depth[u0]+1;order.push(p)}})}}
+ order.forEach(function(i){inset[i]=1;level[i]=0});
+ var changed=true,it=0;
+ while(changed&&it++<40){changed=false;order.forEach(function(u){NN[u][8].forEach(function(p){if(inset[p]&&level[p]<level[u]+1&&level[u]+1<=30){level[p]=level[u]+1;changed=true}})})}
+ var maxL=0;order.forEach(function(i){if(level[i]>maxL)maxL=level[i]});
+ var byL=[];for(var l=0;l<=maxL;l++)byL.push([]);order.forEach(function(i){byL[level[i]].push(i)});
+ var children={};order.forEach(function(u){NN[u][8].forEach(function(p){if(inset[p])(children[p]=children[p]||[]).push(u)})});
+ // 1) build every card, 2) measure each at its natural height so full column names fit, 3) lay out with those heights
+ var owners={},logic={},card={};
+ order.forEach(function(i){var n=NN[i],w=sv(n[6]);if(w){owners[w]=(owners[w]||0)+1;if(n[0]===0&&!n[4])logic[w]=(logic[w]||0)+1}
+  var cls='gn k'+n[0]+(n[0]===0&&!isWb(n)?' dm':'')+(i===f?' me':'');
+  var kind=n[0]===0?(n[4]?'pass-through':'calculated'):KL[n[0]];
+  var loc=sv(n[2])+' \u00b7 '+sv(n[1]);
+  var open=sv(n[7]);
+  var role=rec&&rec.r&&rec.r[i]?'<div class="role">&#9873; '+esc(rec.r[i])+'</div>':'';
+  var iso=(!rec&&RN[i])?'<button type="button" class="iso" data-rec="'+i+'" title="Show only the cards involved in: '+esc(RN[i][0].h)+'">&#9873; Isolate'+(RN[i].length>1?' ('+RN[i].length+')':'')+'</button>':'';
+  card[i]={cls:cls,title:esc(sv(n[5])||loc),inner:role+'<div class="c">'+esc(sv(n[3]))+'</div><div class="l" title="'+esc(loc)+'">'+esc(loc)+'</div><div class="w">'+esc(sv(n[6])||'no owner')+' &middot; '+kind+(cut[i]?' &middot; +'+cut[i]+' upstream':'')+'</div>'
+   +'<div class="a">'+(i===f?'<span class="na">&#9679; current</span>':'<button type="button" data-f="'+i+'">Focus</button>')+(open?'<a href="'+esc(open)+'" target="_blank" rel="noopener">Open &#8599;</a>':'<span class="na">no link</span>')+iso+'</div>'}});
+ var meas=$('gmeasure');if(!meas){meas=document.createElement('div');meas.id='gmeasure';document.body.appendChild(meas)}
+ meas.innerHTML=order.map(function(i){return '<div class="'+card[i].cls+' meas">'+card[i].inner+'</div>'}).join('');
+ var hh={},base=rec?124:104;
+ Array.prototype.forEach.call(meas.children,function(c,k){hh[order[k]]=Math.max(base,Math.ceil(c.getBoundingClientRect().height))});
+ meas.innerHTML='';
+ var y={};
+ byL.forEach(function(arr,l){
+  if(l>0){arr.forEach(function(i){var cs=(children[i]||[]).filter(function(c){return y[c]!==undefined});
+    y[i]=cs.length?cs.reduce(function(a,c){return a+y[c]+hh[c]/2},0)/cs.length-hh[i]/2:0});
+   arr.sort(function(a,b){return y[a]-y[b]})}
+  var cur=0;arr.forEach(function(i){y[i]=l>0?Math.max(y[i],cur):cur;cur=y[i]+hh[i]+GY});
+ });
+ var maxB=0;order.forEach(function(i){if(y[i]+hh[i]>maxB)maxB=y[i]+hh[i]});
+ if(!rec)y[f]=Math.max(0,(maxB-hh[f])/2);
+ var W=(maxL+1)*(NW+GX)+20,H=maxB+28;
+ var cv=$('gcv');cv.style.width=W+'px';cv.style.height=H+'px';
+ var px=function(i){return 10+(maxL-level[i])*(NW+GX)},py=function(i){return 10+y[i]};
+ var paths='',html='';
+ order.forEach(function(u){NN[u][8].forEach(function(p){if(!inset[p])return;
+  var x1=px(p)+NW,y1=py(p)+hh[p]/2,x2=px(u),y2=py(u)+hh[u]/2,m=(x1+x2)/2;
+  paths+='<path class="gp" d="M'+x1+','+y1+' C'+m+','+y1+' '+m+','+y2+' '+x2+','+y2+'"/>'})});
+ order.forEach(function(i){html+='<div class="'+card[i].cls+'" style="left:'+px(i)+'px;top:'+py(i)+'px;height:'+hh[i]+'px" title="'+card[i].title+'">'+card[i].inner+'</div>'});
+ $('gsvg').setAttribute('viewBox','0 0 '+W+' '+H);$('gsvg').innerHTML=paths;
+ Array.prototype.slice.call(cv.querySelectorAll('.gn')).forEach(function(x){x.remove()});
+ cv.insertAdjacentHTML('beforeend',html);
+ var fn=NN[f];
+ $('ghead').innerHTML='<b>'+esc(sv(fn[3]))+'</b> <span class="mut">in '+esc(sv(fn[2]))+' &middot; '+esc(sv(fn[1]))+'</span>';
+ var names=Object.keys(owners).sort(function(a,b){return (logic[b]||0)-(logic[a]||0)||owners[b]-owners[a]});
+ var chips=names.map(function(p){return '<span class="chip">'+esc(p)+' &middot; '+(logic[p]?logic[p]+' with logic':'source only')+'</span>'}).join('');
+ var gr=$('grec');
+ if(rec){
+  var rc={};Object.keys(rec.r||{}).forEach(function(k){rc[rec.r[k]]=(rc[rec.r[k]]||0)+1});
+  gr.hidden=false;
+  gr.innerHTML='<div class="meta"><span class="pill sev-'+rec.s+'">'+SEVL[rec.s]+'</span><b>'+esc(TYPE[rec.t]||rec.t)+'</b><span>Saves: '+esc(rec.v)+'</span></div>'
+   +'<h3>'+esc(rec.h)+'</h3><p>'+esc(rec.d)+'</p><p><b>Do:</b> '+esc(rec.a)+'</p>'
+   +'<div class="meta">Cards involved: '+Object.keys(rc).map(function(k){return '<span class="chip">'+rc[k]+' &times; '+esc(k)+'</span>'}).join('')
+   +'<button class="btn" type="button" data-iso="off">Show full trace</button></div>';
+  $('ginv').innerHTML='Showing '+order.length+' card'+(order.length>1?'s':'')+' involved in this recommendation, with the paths that connect them. Owners to involve: '+chips;
+ }else{
+  gr.hidden=true;
+  var hits={};order.forEach(function(i){(RN[i]||[]).forEach(function(r){hits[r.i]=r})});var hk=Object.keys(hits);
+  $('ginv').innerHTML=order.length+' column'+(order.length>1?'s':'')+' in the chain'+(order.length>=CAP?' (capped)':'')+'. Owners: '+chips
+   +(hk.length?'<br><b>&#9873; '+hk.length+' recommendation'+(hk.length>1?'s':'')+' touch this chain:</b> '+hk.slice(0,5).map(function(k){return '<span class="pill sev-'+hits[k].s+'">'+SEVL[hits[k].s]+'</span> '+esc(hits[k].h)+' <button class="btn" type="button" data-iso="'+hits[k].i+'">Isolate</button>'}).join('<br>'):'');
+ }
+ var sc=$('gsc');sc.scrollLeft=sc.scrollWidth;
+ $('gback').disabled=!rec&&hist.length<2;
+}
+renderRecs();
+function renderStats(){
+ var by={},sev={high:0,med:0,low:0},own={};
+ RC.forEach(function(r){by[r.t]=(by[r.t]||0)+1;sev[r.s]++;r.o.forEach(function(o){own[o]=(own[o]||0)+1})});
+ if(!RC.length){$('rstats').innerHTML='<p class="mut">No duplicated logic was found in the traced workbook and models.</p>';return}
+ var types=Object.keys(by).sort(function(a,b){return by[b]-by[a]});
+ var people=Object.keys(own).sort(function(a,b){return own[b]-own[a]}).slice(0,4);
+ $('rstats').innerHTML='<div class="rrow"><div class="rstat"><b>'+RC.length+'</b><span>findings</span></div><div class="rstat hi"><b>'+sev.high+'</b><span>high impact</span></div><div class="rstat md"><b>'+sev.med+'</b><span>medium</span></div><div class="rstat"><b>'+sev.low+'</b><span>low</span></div></div>'
+  +'<div class="rrow"><span class="rlabel">By type</span>'+types.map(function(k){return '<span class="chip">'+esc(TYPE[k]||k)+' &middot; '+by[k]+'</span>'}).join('')+'</div>'
+  +'<div class="rrow"><span class="rlabel">Most involved</span>'+people.map(function(p){return '<span class="chip">'+esc(p)+' &middot; '+own[p]+'</span>'}).join('')+'</div>';
+}
+function setRecs(open,save){
+ $('rbody').hidden=!open;$('rtoggle').setAttribute('aria-expanded',open?'true':'false');
+ if(save){try{localStorage.setItem('recsOpen',open?'1':'0')}catch(e){}}
+}
+renderStats();
+var wasOpen=false;try{wasOpen=localStorage.getItem('recsOpen')==='1'}catch(e){}
+setRecs(wasOpen,false);
+$('rtoggle').addEventListener('click',function(){setRecs($('rbody').hidden,true)});
+</script>
+
+</body></html>

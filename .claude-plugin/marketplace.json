@@ -1,0 +1,11 @@
+{
+  "name": "sigma-navigable-erd",
+  "owner": { "name": "Matt Morgenroth" },
+  "plugins": [
+    {
+      "name": "sigma-navigable-erd",
+      "source": "./",
+      "description": "Navigable Entity Relationship Diagram for Sigma workbooks: column-level lineage, ownership, and duplicate-logic recommendations."
+    }
+  ]
+}

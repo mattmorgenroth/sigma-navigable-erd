@@ -1,0 +1,6 @@
+{
+  "_comment": "Optional. Map warehouse table prefixes (DATABASE.SCHEMA or DATABASE.SCHEMA.TABLE) to the team or person who owns them. Longest prefix wins. Remove this key before use or leave it; keys starting with _ are ignored.",
+  "ANALYTICS.MARTS": "Data Engineering (jane.doe@example.com)",
+  "ANALYTICS.MARTS.FINANCE": "Finance Analytics (finance-data@example.com)",
+  "RAW": "Platform Team"
+}

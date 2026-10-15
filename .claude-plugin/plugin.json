@@ -1,0 +1,9 @@
+{
+  "name": "sigma-navigable-erd",
+  "version": "0.1.0",
+  "description": "Navigable Entity Relationship Diagram for Sigma workbooks: column-level lineage, ownership, and recommendations for duplicated logic.",
+  "author": { "name": "Matt Morgenroth" },
+  "license": "MIT",
+  "repository": "https://github.com/mattmorgenroth/sigma-navigable-erd",
+  "keywords": ["sigma", "lineage", "erd", "data-lineage", "workbook", "skill"]
+}
