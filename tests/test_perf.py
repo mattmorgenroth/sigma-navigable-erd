@@ -122,7 +122,7 @@ class Opinions(unittest.TestCase):
 
     def test_the_generated_sql_is_read_and_summarized(self):
         comp = self.d["compiled"]
-        self.assertEqual(set(comp), {"eCust", "eOrd", "eExp", "eExp2", "eRev", "eRevSeg"})
+        self.assertEqual(set(comp), {"eCust", "eOrd", "eExp", "eExp2", "eRev", "eRevSeg", "eUnnest", "eMsg"})
         self.assertEqual(comp["eOrd"]["profile"]["joins"], 5)
         self.assertEqual(self.d["compiled_note"], "")
         for c in comp.values():

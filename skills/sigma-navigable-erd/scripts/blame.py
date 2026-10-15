@@ -155,6 +155,66 @@ def _fetch_obj(kind, oid, key):
     spec = load_yaml(txt)
     meta = json.loads(api(f"/v2/{base}/{oid}"))
     OBJS[key] = Obj(kind, oid, spec, meta, collections.Counter(TOKEN.findall(txt)))
+    if kind == "workbook":
+        apply_api_names(OBJS[key])
+
+
+def _words(text):
+    return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in ("of", "the", "and")]
+
+
+def apply_api_names(obj):
+    """Give columns the spec leaves unnamed the display names the API reports for the element.
+
+    Other formulas refer to a column by its display name, so a column known only by its id breaks the trace.
+    Order cannot be trusted (it differs between the spec and the API in many elements), so match by set: take away the
+    names already accounted for; what is left belongs to the unnamed columns, and formula text breaks any tie."""
+    try:
+        api_cols, tok = {}, None
+        while True:
+            q = f"/v2/workbooks/{obj.id}/elements?limit=500" + (f"&pageToken={urllib.parse.quote(tok)}" if tok else "")
+            page = json.loads(api(q))
+            for a in page.get("entries", []):
+                api_cols[a["elementId"]] = a.get("columns") or []
+            tok = page.get("nextPageToken")
+            if not tok:
+                break
+    except Exception:
+        return
+    for eid, el in obj.elements.items():
+        cols, names = el.get("columns") or [], api_cols.get(eid)
+        if not cols or not names or len(names) != len(cols):
+            continue
+        left = collections.Counter(N(n) for n in names)
+        lost = []
+        for c in cols:
+            key = N(colname(c))
+            if left.get(key, 0) > 0:
+                left[key] -= 1
+            else:
+                lost.append(c)
+        spare = []                                               # API names no known column has claimed
+        pool = collections.Counter(left)
+        for n in names:
+            if pool.get(N(n), 0) > 0:
+                pool[N(n)] -= 1
+                spare.append(n)
+        lost = [c for c in lost if not c.get("name")]
+        if len(lost) == 1 and len(spare) == 1:
+            lost[0]["name"] = spare[0]
+            continue
+        for c in lost:
+            f = (c.get("formula") or "").lower()
+            best, best_s, tie = None, 0, False
+            for n in spare:
+                sc = sum(1 for w in _words(n) if w in f) + (3 if N(n).lower() == "row count" and f.startswith("count(") else 0)
+                if sc > best_s:
+                    best, best_s, tie = n, sc, False
+                elif sc == best_s and sc > 0:
+                    tie = True
+            if best and not tie:
+                c["name"] = best
+                spare.remove(best)
 
 
 def nm(x):
@@ -231,10 +291,25 @@ class Tracer:
                 add(s.get("primarySource"))
             elif k in ("empty", "linked"):
                 out.append((nm(el.get("name")) or "Input table", ("input", obj, el["id"])))
+            elif k == "unnest":
+                src = s.get("source") or {}
+                out.append(("Unnest of " + self.elem_label(obj, src.get("elementId")), ("unnest", obj, el, s)))
+            elif k == "code-output":
+                out.append((f"Code: {s.get('output')}", ("code", obj, el, s)))
             elif k in ("manual", "source", "upload"):
                 out.append((nm(el.get("name")) or k, ("manual",)))
         add(el.get("source"))
         return out
+
+    def elem_label(self, obj, eid):
+        """What formulas call an element: its name, or, when it has none, what it reads from."""
+        t = obj.elements.get(eid)
+        if t is None:
+            return str(eid)
+        if nm(t.get("name")):
+            return nm(t["name"])
+        first = self.sources(obj, t)
+        return first[0][0] if first else str(eid)
 
     def trace(self, obj, eid, cname, stack=()):
         key = (obj.kind, obj.id, eid, cname)
@@ -391,6 +466,38 @@ class Tracer:
                 if not subs:
                     return None
             return self.trace(o, eid, cname, stack)
+        if k == "unnest":
+            o, el, s = node[1], node[2], node[3]
+            srcid = (s.get("source") or {}).get("elementId")
+            if N(cname) != N(s.get("valueColumn", "")):
+                return self.trace(o, srcid, cname, stack)                    # an output column passes straight through
+            up = self.trace(o, srcid, s.get("arrayColumn", ""), stack)       # the new column is built from the array column
+            r = self.res()
+            self.merge(r, up)
+            r["raw"] = False
+            ename = nm(el.get("name")) or "(untitled) " + el["id"]
+            text = f"Unnest of [{s.get('arrayColumn')}]: one row per value in the array"
+            r["touched"] = [{"obj": o.name, "kind": o.kind, "element": ename, "owner": o.owner, "editor": o.last_editor,
+                             "formula": text}] + r["touched"]
+            r["ref"] = f"u|{o.id}|{el['id']}|{N(cname)}"
+            self.G[r["ref"]] = {"k": "col", "ok": o.kind, "o": o.name, "oid": o.id, "e": ename, "eid": el["id"], "c": cname,
+                                "raw": False, "f": text, "w": o.owner, "u": self.eurl(o, el["id"]),
+                                "ups": [up["ref"]] if up.get("ref") else [], "hid": False}
+            self.F[r["ref"]] = text
+            return r
+        if k == "code":
+            o, el, s = node[1], node[2], node[3]
+            r = self.res()
+            r["raw"] = False
+            r["origins"].add(f"code output: {s.get('output')}")
+            r["terminals"].add(f"{o.owner} (code in {o.name})")
+            r["touched"] = [{"obj": o.name, "kind": o.kind, "element": nm(el.get("name")) or "(untitled) " + el["id"],
+                             "owner": o.owner, "editor": o.last_editor, "formula": "computed by a code element"}]
+            r["ref"] = f"k|{o.id}|{el['id']}|{N(cname)}"
+            self.G[r["ref"]] = {"k": "other", "ok": o.kind, "o": o.name, "oid": o.id, "e": f"code output: {s.get('output')}",
+                                "eid": el["id"], "c": cname, "raw": False, "f": "computed by a code element", "w": o.owner,
+                                "u": self.eurl(o, el["id"]), "ups": []}
+            return r
         r = self.res()
         if k == "hidden":
             o = node[1]

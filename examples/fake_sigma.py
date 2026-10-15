@@ -11,6 +11,7 @@ The fixture deliberately contains each kind of duplicated logic the recommendati
   * a hidden calculated column that nothing uses ("Scratch")
   * a lookup that matches on a key wrapped in a function, and repeated regular-expression logic in two columns
   * two summary elements whose generated SQL re-runs the same four-table join stack
+  * a column the spec leaves unnamed (its display name comes from the API), an unnest element, and a code output
   The fake API also serves invented compiled SQL for every element, so the performance opinions can be exercised.
 It also contains things that must NOT be flagged: pass-through columns and a clean customer element.
 """
@@ -42,7 +43,7 @@ MEMBERS = {
 # warehouse tables as the API reports them (upper-case names)
 TABLES = {
     "ANALYTICS.MARTS.ORDERS": ["ORDER_ID", "ORDER_DATE", "REGION", "CUSTOMER_ID", "SEGMENT", "AMOUNT", "DISCOUNT", "COST"],
-    "ANALYTICS.MARTS.CUSTOMERS": ["CUSTOMER_ID", "NAME", "SEGMENT", "TIER", "COUNTRY", "REGION"],
+    "ANALYTICS.MARTS.CUSTOMERS": ["CUSTOMER_ID", "NAME", "SEGMENT", "TIER", "COUNTRY", "REGION", "TAGS"],
 }
 
 
@@ -88,7 +89,8 @@ WORKBOOK = {
                      col("cu02", "Name", "[Customer Dimension/Name]"),
                      col("cu03", "Segment", "[Customer Dimension/Segment]"),
                      col("cu04", "Tier", "[Customer Dimension/Tier]"),
-                     col("cu05", "Country", "[Customer Dimension/Country]")]},
+                     col("cu05", "Country", "[Customer Dimension/Country]"),
+                     col("cu06", "Tags", "[Customer Dimension/Tags]")]},
         {"id": "eOrd", "kind": "table", "name": "Orders by Customer", "source": wh("ORDERS"),
          "columns": [col("or01", "Order Id", "[ORDERS/Order Id]"),
                      col("or02", "Order Date", "[ORDERS/Order Date]"),
@@ -114,9 +116,32 @@ WORKBOOK = {
          "source": {"kind": "data-model", "dataModelId": DM_REV, "elementId": "dRev"},
          "columns": [col("rs01", "Order Id", "[Revenue/Order Id]"),
                      col("rs02", "Net Revenue", "[Revenue/Net Revenue]"),
-                     col("rs03", "Average Net Revenue", "Avg([Net Revenue])")]},
+                     col("rs03", "Average Net Revenue", "Avg([Net Revenue])"),
+                     {"id": "rs04", "formula": "Count()"},                                    # no name: the API calls it "Row Count"
+                     col("rs05", "Rows Doubled", "[Row Count] * 2")]},
+        {"id": "eUnnest", "kind": "table", "name": "Customer Tags",
+         "source": {"kind": "unnest", "source": {"elementId": "eCust", "kind": "table"}, "arrayColumn": "Tags",
+                    "valueColumn": "Values of Tags", "outputColumns": ["Customer Id", "Name", "Values of Tags"]},
+         "columns": [col("un01", "Customer Id", "[Unnest of Customers/Customer Id]"),
+                     col("un02", "Name", "[Unnest of Customers/Name]"),
+                     {"id": "un03", "formula": "Text([Unnest of Customers/Values of Tags])"}]},     # unnamed: "Values of Tags"
+        {"id": "eMsg", "kind": "table", "name": "Alert Message",
+         "source": {"kind": "code-output", "elementId": "eCode", "output": "slack-markdown"},
+         "columns": [col("ms01", "Message", "[Code: slack-markdown/MARKDOWN]")]},
     ]},
 }
+
+def api_display_names(element):
+    """What the API reports as a column's display name: the explicit name, else a name derived from the formula."""
+    out = []
+    for c in element.get("columns", []):
+        f = c.get("formula", "")
+        plain = re.fullmatch(r"\[(.+)\]", f)
+        out.append(c.get("name") or ("Row Count" if f.startswith("Count(") else
+                                      "Values of Tags" if "Values of Tags" in f else
+                                      plain.group(1).split("/")[-1] if plain else c["id"]))
+    return out
+
 
 DM_REVENUE = {
     "dataModelId": DM_REV, "name": "Revenue Model", "url": f"{BASE_URL}/data-model/Revenue-Model-dmBBBB2222", "ownerId": "m-priya",
@@ -136,7 +161,8 @@ DM_CUSTOMER = {
                      col("cd02", "Name", "[CUSTOMERS/Name]"),
                      col("cd03", "Segment", 'If(IsNull([CUSTOMERS/Segment]), "Unknown", [CUSTOMERS/Segment])'),
                      col("cd04", "Tier", "[CUSTOMERS/Tier]"),
-                     col("cd05", "Country", "[CUSTOMERS/Country]")]}]}],
+                     col("cd05", "Country", "[CUSTOMERS/Country]"),
+                     col("cd06", "Tags", "[CUSTOMERS/Tags]")]}]}],
 }
 
 OBJECTS = {  # id -> (spec, last editor)
@@ -263,6 +289,8 @@ def compiled_sql():
     return {
         "eCust": "select CUSTOMER_ID, NAME, SEGMENT, TIER, COUNTRY from ANALYTICS.MARTS.CUSTOMERS limit 1000",
         "eOrd": ord_sql, "eExp": export, "eExp2": export,
+        "eUnnest": "select CUSTOMER_ID, NAME, f.value::text VALUES_OF_TAGS from ANALYTICS.MARTS.CUSTOMERS, lateral flatten(input => TAGS) f limit 1000",
+        "eMsg": "select 'alert' MARKDOWN",
         "eRev": _stack_sql(", sum(Q1.AMOUNT) over (partition by Q1.REGION) PER_REGION_4"),
         "eRevSeg": _stack_sql(", avg(Q1.AMOUNT) over () AVG_5"),
     }
@@ -281,6 +309,10 @@ def fake_http(path, data=None, headers=None, tries=4):
     if m:
         f, l, e = MEMBERS[m.group(1)]
         return json.dumps({"memberId": m.group(1), "firstName": f, "lastName": l, "email": e})
+    m = re.fullmatch(r"/v2/workbooks/([\w-]+)/elements", p)
+    if m:
+        return json.dumps({"entries": [{"elementId": e["id"], "type": e["kind"], "name": e["name"], "columns": api_display_names(e)}
+                                       for e in WORKBOOK["document"]["elements"]]})
     m = re.fullmatch(r"/v2/workbooks/([\w-]+)/queries", p)
     if m:
         names = {e["id"]: e["name"] for e in WORKBOOK["document"]["elements"]}

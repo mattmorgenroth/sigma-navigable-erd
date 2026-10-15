@@ -43,9 +43,27 @@ class TraceTests(unittest.TestCase):
 
     def test_every_column_is_traced(self):
         cols = [c for e in self.d["elements"] for c in e["columns"]]
-        self.assertEqual(len(self.d["elements"]), 6)
-        self.assertEqual(len(cols), 50)
+        self.assertEqual(len(self.d["elements"]), 8)
+        self.assertEqual(len(cols), 57)
         self.assertFalse([c["name"] for c in cols if c["unresolved"]])
+
+    def test_unnamed_columns_take_the_names_the_api_reports(self):
+        by = {e["name"]: [c["name"] for c in e["columns"]] for e in self.d["elements"]}
+        self.assertIn("Row Count", by["Revenue by Segment"])
+        self.assertIn("Values of Tags", by["Customer Tags"])
+        self.assertFalse([n for ns in by.values() for n in ns if n in ("rs04", "un03")])
+
+    def test_unnest_and_code_outputs_are_traced(self):
+        by = {e["name"]: {c["name"]: c for c in e["columns"]} for e in self.d["elements"]}
+        tags = by["Customer Tags"]
+        self.assertFalse(tags["Values of Tags"]["raw"])                         # derived from the array column
+        self.assertFalse(tags["Values of Tags"]["unresolved"])
+        self.assertTrue(tags["Customer Id"]["raw"])                             # passes straight through the unnest
+        self.assertFalse(by["Alert Message"]["Message"]["unresolved"])          # a code output is a terminal, not a gap
+
+    def test_the_row_count_reference_resolves_to_its_unnamed_column(self):
+        by = {e["name"]: {c["name"]: c for c in e["columns"]} for e in self.d["elements"]}
+        self.assertFalse(by["Revenue by Segment"]["Rows Doubled"]["unresolved"])
 
     def test_pass_through_vs_calculated(self):
         by = {e["name"]: {c["name"]: c for c in e["columns"]} for e in self.d["elements"]}
