@@ -11,6 +11,8 @@ The fixture deliberately contains each kind of duplicated logic the recommendati
   * a hidden calculated column that nothing uses ("Scratch")
 It also contains things that must NOT be flagged: pass-through columns and a clean customer element.
 """
+import base64
+import hashlib
 import json
 import re
 import sys
@@ -138,12 +140,97 @@ LINEAGE = {
 }
 
 
+API_HOST = "https://api.sigmacomputing.com"
+CLIENT_ID, CLIENT_SECRET = "fake-client-id", "fake-client-secret"
+
+
+class FakeAuth:
+    """A fake Sigma authorization server: discovery, dynamic registration, PKCE, refresh-token rotation, whoami."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.valid_access, self.refresh_tokens, self.codes, self.clients = set(), {}, {}, {}
+        self.n = 0
+        self.log = []                       # (method, url) of every request, so tests can assert on them
+        self.offer_discovery = True         # False makes whoami answer 401 without a WWW-Authenticate header
+        self.allow_registration = True
+        self.reject_token_requests = False
+
+    def _issue(self, client_id):
+        self.n += 1
+        access, refresh = f"access-{self.n}", f"refresh-{self.n}"
+        self.valid_access.add(access)
+        self.refresh_tokens[refresh] = client_id
+        return {"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600}
+
+    def issue_code(self, client_id, redirect, challenge):
+        self.n += 1
+        code = f"code-{self.n}"
+        self.codes[code] = (client_id, redirect, challenge)
+        return code
+
+    def request(self, method, url, headers=None, data=None, form=None, json_body=None, timeout=30):
+        from auth import check_host
+        check_host(url)                                    # the real code must never leave sigmacomputing.com
+        self.log.append((method, url))
+        u = urllib.parse.urlparse(url)
+        p, h = u.path, {k.lower(): v for k, v in (headers or {}).items()}
+        out = lambda status, body=None, hdrs=None: (status, {k.lower(): v for k, v in (hdrs or {}).items()},
+                                                    json.dumps(body) if body is not None else "")
+        if p == "/v2/whoami":
+            if h.get("authorization", "").removeprefix("Bearer ") in self.valid_access:
+                return out(200, {"userId": "m-alex", "organizationId": ORG})
+            hdr = {"WWW-Authenticate": f'Bearer resource_metadata="{API_HOST}/v2/.well-known/oauth-protected-resource", scope="api:access"'}
+            return out(401, {"message": "unauthorized"}, hdr if self.offer_discovery else {})
+        if p == "/v2/.well-known/oauth-protected-resource":
+            return out(200, {"resource": API_HOST + "/v2", "authorization_servers": [API_HOST], "scopes_supported": ["api:access"]})
+        if p == "/.well-known/oauth-authorization-server":
+            return out(200, {"issuer": API_HOST, "authorization_endpoint": API_HOST + "/mcp/authorize",
+                             "token_endpoint": API_HOST + "/mcp/token", "registration_endpoint": API_HOST + "/mcp/register",
+                             "code_challenge_methods_supported": ["S256"], "response_types_supported": ["code"],
+                             "grant_types_supported": ["authorization_code", "refresh_token"],
+                             "token_endpoint_auth_methods_supported": ["none"]})
+        if p == "/mcp/register":
+            if not self.allow_registration:
+                return out(403, {"error": "registration_disabled"})
+            cid = f"client-{len(self.clients) + 1}"
+            self.clients[cid] = json_body
+            return out(201, {"client_id": cid})
+        if p == "/mcp/token":
+            if self.reject_token_requests:
+                return out(400, {"error": "invalid_grant"})
+            if form["grant_type"] == "authorization_code":
+                cid, redirect, challenge = self.codes.pop(form["code"], (None, None, None))
+                verifier_ok = base64.urlsafe_b64encode(hashlib.sha256(form["code_verifier"].encode()).digest()).rstrip(b"=").decode() == challenge
+                if cid != form["client_id"] or redirect != form["redirect_uri"] or not verifier_ok:
+                    return out(400, {"error": "invalid_grant"})
+                return out(200, self._issue(cid))
+            if form["grant_type"] == "refresh_token":
+                cid = self.refresh_tokens.pop(form["refresh_token"], None)     # single use: it rotates
+                if cid is None or cid != form["client_id"]:
+                    return out(400, {"error": "invalid_grant"})
+                return out(200, self._issue(cid))
+        if p == "/v2/auth/token":
+            if form["grant_type"] == "client_credentials" and (form["client_id"], form["client_secret"]) == (CLIENT_ID, CLIENT_SECRET):
+                self.n += 1
+                self.valid_access.add(f"cc-{self.n}")
+                return out(200, {"access_token": f"cc-{self.n}", "token_type": "Bearer", "expires_in": 3600})
+            return out(401, {"message": "bad credentials"})
+        raise KeyError(f"fake authorization server has no route for {method} {url}")
+
+
+AUTH = FakeAuth()
+
+
 def fake_http(path, data=None, headers=None, tries=4):
     """Drop-in replacement for blame.http that answers from the fixture above."""
     u = urllib.parse.urlparse(path)
     p = u.path
-    if p == "/v2/auth/token":
-        return json.dumps({"access_token": "fake-token"})
+    token = (headers or {}).get("Authorization", "").removeprefix("Bearer ")
+    if token not in AUTH.valid_access:
+        raise PermissionError(f"the tracer called {p} without a valid token")
     if p == "/v2/whoami":
         return json.dumps({"organizationId": ORG, "userId": "m-alex"})
     m = re.fullmatch(r"/v2/members/([\w-]+)", p)
@@ -175,15 +262,44 @@ def fake_http(path, data=None, headers=None, tries=4):
 
 
 def install(blame_module):
-    """Point the tracer at this fake API. Returns the base URL to use."""
+    """Point the tracer and the sign-in code at this fake API. Returns the base URL to use.
+
+    Sign-in sessions live in memory, so a test or demo never touches your real keychain. The default setup offers
+    API client credentials, so the demo uses the fallback path; the OAuth tests drive the browser path directly.
+    """
     import os
+    import auth
+    AUTH.reset()
+    STORE.data.clear()
     blame_module.http = fake_http
-    os.environ.setdefault("SIGMA_CLIENT_ID", "fake-client-id")
-    os.environ.setdefault("SIGMA_CLIENT_SECRET", "fake-client-secret")
-    os.environ.setdefault("SIGMA_BASE_URL", "https://api.sigmacomputing.com")
-    blame_module.configure(os.environ["SIGMA_BASE_URL"])
-    blame_module._tok = None
-    return os.environ["SIGMA_BASE_URL"]
+    auth._request = AUTH.request
+    auth.backend = lambda: STORE
+    os.environ["SIGMA_CLIENT_ID"] = CLIENT_ID
+    os.environ["SIGMA_CLIENT_SECRET"] = CLIENT_SECRET
+    os.environ["SIGMA_BASE_URL"] = API_HOST
+    for k in ("SIGMA_API_TOKEN", "SIGMA_AUTH_MODE"):
+        os.environ.pop(k, None)
+    blame_module.configure(API_HOST)
+    blame_module.set_auth_mode(None)
+    return API_HOST
+
+
+class _Store:
+    """In-memory stand-in for the OS keychain."""
+    def __init__(self):
+        self.data = {}
+
+    def get(self, account):
+        return self.data.get(account)
+
+    def set(self, account, value):
+        self.data[account] = value
+
+    def delete(self, account):
+        self.data.pop(account, None)
+
+
+STORE = _Store()
 
 
 if __name__ == "__main__":

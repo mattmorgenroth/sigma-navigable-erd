@@ -8,26 +8,34 @@ warehouse table. Records every place logic is applied (anything that is not a pl
 import collections, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 import yaml
 
-ALLOWED_HOST_SUFFIXES = (".sigmacomputing.com",)
+import auth
+
 NOOWNER = "Warehouse table (owner not set)"
-_tok = None
 BASE = None
+AUTH_MODE = None
+_tok = None
 
 
 def configure(base_url):
     """Set the API base URL after checking it is a Sigma host (credentials are only ever sent there)."""
     global BASE
-    u = urllib.parse.urlparse(base_url.rstrip("/"))
-    if u.scheme != "https" or not (u.hostname or "").endswith(ALLOWED_HOST_SUFFIXES):
-        raise SystemExit(f"Refusing base URL {base_url!r}: it must be an https Sigma API host.")
+    try:
+        auth.check_host(base_url, "API base URL")
+    except auth.AuthError as e:
+        raise SystemExit(str(e))
     BASE = base_url.rstrip("/")
+
+
+def set_auth_mode(mode):
+    global AUTH_MODE, _tok
+    AUTH_MODE, _tok = mode, None
 
 
 def http(path, data=None, headers=None, tries=4):
     req = urllib.request.Request(BASE + path, data=data, headers=headers or {})
     for i in range(tries):
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
+            with auth._opener.open(req, timeout=120) as r:       # never follows redirects, so a token cannot be forwarded
                 return r.read().decode()
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503, 504) and i < tries - 1:
@@ -36,15 +44,19 @@ def http(path, data=None, headers=None, tries=4):
             raise
 
 
-def token():
+def token_info():
+    """The current verified token, renewed shortly before it expires."""
     global _tok
-    if not _tok:
-        body = urllib.parse.urlencode({
-            "grant_type": "client_credentials",
-            "client_id": os.environ["SIGMA_CLIENT_ID"],
-            "client_secret": os.environ["SIGMA_CLIENT_SECRET"]}).encode()
-        _tok = json.loads(http("/v2/auth/token", body))["access_token"]
+    if _tok is None or (_tok.expires_at and _tok.expires_at - 60 < time.time()):
+        try:
+            _tok = auth.get_token(BASE, AUTH_MODE)
+        except auth.AuthError as e:
+            raise SystemExit(str(e))
     return _tok
+
+
+def token():
+    return token_info().value
 
 
 def api(path):

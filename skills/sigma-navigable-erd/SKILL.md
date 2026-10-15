@@ -34,10 +34,13 @@ calculated columns, unused hidden columns) so you can remove it.
 
 What you need
 - Python 3.9+ and PyYAML (pip install -r requirements.txt)
-- A Sigma API client (client ID and secret) for the organization that holds the workbook
 - Your Sigma API host (it depends on your Sigma cloud and region)
-- The API user must be able to view the workbook and the data models behind it
-- Credentials saved in a private file on your machine, not pasted into this chat
+- A Sigma sign-in. By default you sign in once with your browser and the tool then acts as
+  you, so there is no secret to store. Your account type may need the "Use Sigma API with
+  OAuth" permission. If browser sign-in is not available to you, use an API client (client
+  ID and secret) saved in a private file on your machine, never pasted into this chat.
+- Whoever signs in (or owns the API client) must be able to view the workbook and the data
+  models behind it
 
 How results are shared
 The result is one HTML page, saved in a folder on your machine. You can send the
@@ -51,27 +54,35 @@ Ready to set up, or already configured?
 ## 2. Setup (do this with the user, never with their secrets in chat)
 
 1. **Install:** `pip install -r requirements.txt` (only PyYAML). Scripts are in this skill's `scripts/` folder.
-2. **Create an API client in Sigma** (Administration, Developer Access, Create). The client acts as its creating user, so that user needs view access to the workbook and its data models. Prefer a dedicated read-only service user. The skill only makes GET requests, plus one POST to look up a warehouse table's columns.
-3. **Pick the API host** that matches the cloud and region of the Sigma organization, for example `https://api.sigmacomputing.com`, `https://aws-api.sigmacomputing.com`, `https://api.us-a.aws.sigmacomputing.com`, `https://api.eu.aws.sigmacomputing.com`, `https://api.uk.sigmacomputing.com`, `https://api.ca.sigmacomputing.com`, `https://api.az.sigmacomputing.com`. These are examples; confirm the one for your organization in Sigma's API documentation. The script refuses any host that is not an HTTPS `*.sigmacomputing.com` host.
-4. **Save credentials** in `~/.sigma-lineage/credentials.env` (the user creates this file themselves) and lock it down:
+2. **Set the API host.** It matches the cloud and region of the Sigma organization, for example `https://api.sigmacomputing.com`, `https://aws-api.sigmacomputing.com`, `https://api.us-a.aws.sigmacomputing.com`, `https://api.eu.aws.sigmacomputing.com`, `https://api.uk.sigmacomputing.com`, `https://api.ca.sigmacomputing.com`, `https://api.az.sigmacomputing.com`. These are examples; confirm the one for your organization in Sigma's API documentation. The tool refuses any host that is not an HTTPS `*.sigmacomputing.com` host. Put it in `~/.sigma-lineage/credentials.env` (the host is not a secret) or pass `--base-url`:
 
    ```
-   SIGMA_BASE_URL="https://api.sigmacomputing.com"
+   mkdir -p ~/.sigma-lineage && chmod 700 ~/.sigma-lineage
+   echo 'SIGMA_BASE_URL="https://api.sigmacomputing.com"' > ~/.sigma-lineage/credentials.env
+   ```
+3. **Sign in with the browser (the default).** The user runs this in a terminal: `python3 scripts/run.py login`. A browser tab opens, they sign in to Sigma, and the session is saved in the OS keychain (macOS Keychain, or Linux `secret-tool`). There is no client secret to create or store, and the tool sees only what that person can see. **An assistant cannot do this step for the user** because it needs their browser and a terminal: ask them to run it and tell you when it is done. Where there is no keychain (for example Windows), set `SIGMA_OAUTH_STORE=file` to keep the session in a private file instead. `python3 scripts/run.py logout` removes the saved session.
+4. **Fallback: API client credentials.** For unattended runs, for hosts without browser sign-in, or when the account cannot use it. In Sigma, create a client (Administration, Developer Access) and add it to the same private file, then lock the file down:
+
+   ```
    SIGMA_CLIENT_ID="..."
    SIGMA_CLIENT_SECRET="..."
    ```
    ```
-   mkdir -p ~/.sigma-lineage && chmod 700 ~/.sigma-lineage
    chmod 600 ~/.sigma-lineage/credentials.env
    ```
-   The script refuses a credentials file that other users can read. `--env-file` or `SIGMA_ENV_FILE` points elsewhere.
-5. **Verify:** `python3 scripts/run.py check` confirms authentication and prints the organization and API user, without tracing anything.
+   The tool refuses a file that holds a secret and is readable by other users. It uses these automatically when there is no saved browser session. `--auth-mode client-credentials` forces them.
+5. **Already hold a token?** A valid token in `SIGMA_API_TOKEN` is used as is. (Sigma's own CLI can print one.)
+6. **Verify:** `python3 scripts/run.py check` shows how it signed in (browser sign-in, client credentials, or `SIGMA_API_TOKEN`) and who you are, without tracing anything.
+
+**Sign-in modes** (`--auth-mode` or `SIGMA_AUTH_MODE`): `auto` (default) uses the saved browser sign-in, then client credentials, then offers browser sign-in if you are at a terminal. `browser` and `client-credentials` force one method.
+
+**About browser sign-in.** Sigma documents browser (OAuth) sign-in for its own CLI and MCP server, and the API advertises the standard OAuth discovery that this tool follows. Sigma does not document this exact handshake for third-party tools, so treat it as the preferred route that can change. If `login` says it is unavailable, or your account type lacks the permission, use API client credentials.
 
 **If the user pastes a client secret into the chat:** do not repeat it, do not put it on a command line, and do not write it to a file for them. Tell them plainly that it is now in the conversation history, recommend rotating the key, and ask them to put the new one in the credentials file themselves.
 
 **Optional owners file.** Warehouse tables have no owner in Sigma. To show one, copy `owners.example.json`, map table prefixes (`DATABASE.SCHEMA` or `DATABASE.SCHEMA.TABLE`) to a team or person, and pass `--owners owners.json`. Unmapped tables show as "owner not set".
 
-**No credentials handy?** `python3 ../../examples/offline_demo.py` runs the whole tool against a fictional workbook with no network, so the user can see the result first.
+**No Sigma access yet?** `python3 ../../examples/offline_demo.py` runs the whole tool against a fictional workbook with no network, so the user can see the result first.
 
 ## 3. Run a trace
 
@@ -133,8 +144,14 @@ Offer this after the first successful run. Do not publish anything without the u
 | Symptom | Cause and fix |
 |---|---|
 | `readable by other users` | `chmod 600` the credentials file |
-| `Refusing base URL` | Use the https Sigma API host for your cloud |
-| 401 / 403 | Wrong client or host, or the API user cannot see that object |
+| `Refusing API base URL` | Use the https Sigma API host for your cloud |
+| `No Sigma sign-in is available` | Run `run.py login` in a terminal, or add API client credentials |
+| `login` says browser sign-in is unavailable | This host or account cannot use it; use API client credentials |
+| `Sigma did not issue a token` after signing in | Your account type may lack the "Use Sigma API with OAuth" permission; ask an admin |
+| `Sign-in timed out` | Finish the sign-in within two minutes, or run `login` again |
+| `No OS keychain was found` | Set `SIGMA_OAUTH_STORE=file`, or use API client credentials |
+| `saved Sigma sign-in has expired` | Run `run.py login` again |
+| 401 / 403 | Wrong host, an expired or revoked sign-in, or the signed-in user cannot see that object |
 | `Could not find a workbook` | Link is for another organization, or the API user lacks access |
 | Many "hidden upstream" columns | A data model the API user cannot fully read; use a user with view access to those models |
 | Slow or 429 errors | The script retries with backoff; run again later for very large workbooks |

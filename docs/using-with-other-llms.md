@@ -8,13 +8,13 @@ There are three ways to use it, from least to most automated:
 |---|---|---|
 | **1. No LLM** | Run the commands yourself ([README](../README.md#use-it-from-the-command-line)). | Not involved. |
 | **2. LLM as explainer** | Run the commands yourself, then paste `recommendations.md` into a chat. | Explains the findings, prioritizes them, drafts tickets and messages to owners. Needs no tools. |
-| **3. LLM as operator** | Put credentials in a private file and ask the agent to run it. | Runs the setup check and the trace, reads the output, and reports back. Needs a shell. |
+| **3. LLM as operator** | Sign in once yourself (`run.py login`), then ask the agent to run it. | Runs the setup check and the trace, reads the output, and reports back. Needs a shell. |
 
 ## What every setup needs
 
 1. **Python 3.9+ and PyYAML** where the agent runs commands: `pip install -r skills/sigma-navigable-erd/requirements.txt`.
 2. **Network access from that machine to your Sigma API host** (for example `https://api.sigmacomputing.com`; yours depends on your Sigma cloud and region).
-3. **Credentials in a private file, not in the chat.** `~/.sigma-lineage/credentials.env`, mode 600, containing `SIGMA_BASE_URL`, `SIGMA_CLIENT_ID` and `SIGMA_CLIENT_SECRET`. See [Set up credentials safely](../README.md#set-up-credentials-safely).
+3. **A Sigma sign-in, never typed into the chat.** By default **you** run `python3 skills/sigma-navigable-erd/scripts/run.py login` once in a terminal. It opens your browser; you sign in; the session is kept in your OS keychain. An agent cannot do this step for you, because it needs your browser. After that the agent can run the trace without any secret. For unattended agents or machines with no browser, use API client credentials in `~/.sigma-lineage/credentials.env` (mode 600), or a token in `SIGMA_API_TOKEN`. See [Sign in](../README.md#sign-in).
 4. **The instructions.** Either `AGENTS.md` (short, for coding agents) or `skills/sigma-navigable-erd/SKILL.md` (full workflow). Both tell the agent to explain first, never handle secrets, and share only with consent.
 
 ## Recipes
@@ -92,9 +92,10 @@ and flags duplicated logic), what the user needs (Python 3.9+ with PyYAML, a Sig
 their Sigma API host, view access to the workbook and its data models, credentials in a private
 file), and how results are shared (a single HTML file). Wait for the user to confirm.
 
-Secrets: credentials live in ~/.sigma-lineage/credentials.env (mode 600), created by the user.
-Never ask for, print, echo, log, or write the client secret, and never put it on a command line.
-If the user pastes one into the chat, tell them it is exposed and should be rotated.
+Sign-in: the user signs in themselves with `run.py login` (browser, once). If they use API client
+credentials instead, those live in ~/.sigma-lineage/credentials.env (mode 600), created by the user.
+Never ask for, print, echo, log, or write a client secret or token, and never put one on a command
+line. If the user pastes one into the chat, tell them it is exposed and should be rotated.
 
 Run: `python3 skills/sigma-navigable-erd/scripts/run.py check`, then
 `python3 skills/sigma-navigable-erd/scripts/run.py trace "<workbook URL>"`.
@@ -114,7 +115,8 @@ formulas, table paths and people's names: ask before sharing it anywhere.
 
 | Symptom | Fix |
 |---|---|
-| The agent asks you for your client secret | Tell it to read the credentials file instead. If you already pasted it, rotate the key. |
+| The agent asks you for your client secret or a token | Tell it not to. Sign in yourself with `run.py login`, or put API client credentials in the private file. If you already pasted a secret, rotate it. |
+| `No Sigma sign-in is available` | You have not signed in on this machine yet. Run `run.py login` in a terminal. |
 | The agent cannot reach Sigma | Its shell is sandboxed without network access. Run the tool yourself (level 2). |
 | The agent edits files you did not expect | Ask it to work read-only. The tool itself never writes outside its output folder. |
 | `ModuleNotFoundError: yaml` | `pip install -r skills/sigma-navigable-erd/requirements.txt` in the same Python the agent uses. |

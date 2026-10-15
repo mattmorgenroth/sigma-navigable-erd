@@ -182,11 +182,15 @@ class CliTests(unittest.TestCase):
         blame.configure("https://aws-api.sigmacomputing.com")     # a real one is accepted
         blame.configure("https://api.sigmacomputing.com")
 
-    def test_refuses_an_env_file_other_users_can_read(self):
+    def test_refuses_an_env_file_with_a_secret_that_other_users_can_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = os.path.join(tmp, "creds.env")
             with open(p, "w") as f:
                 f.write('SIGMA_BASE_URL="https://api.sigmacomputing.com"\n')
+            os.chmod(p, 0o644)
+            self.assertTrue(run.load_env(p))              # only the API host: nothing sensitive, so 644 is fine
+            with open(p, "w") as f:
+                f.write('SIGMA_BASE_URL="https://api.sigmacomputing.com"\nSIGMA_CLIENT_SECRET="not-a-real-secret"\n')
             os.chmod(p, 0o644)
             with self.assertRaises(SystemExit) as cm:
                 run.load_env(p)

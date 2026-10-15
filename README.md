@@ -20,7 +20,7 @@ It runs as a skill inside [Claude](#use-it-with-claude), as a plain command-line
 - [What you get](#what-you-get)
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
-- [Set up credentials safely](#set-up-credentials-safely)
+- [Sign in](#sign-in)
 - [Use it from the command line](#use-it-from-the-command-line)
 - [Use it with Claude](#use-it-with-claude)
 - [Use it with other LLMs and agents](#use-it-with-other-llms-and-agents)
@@ -77,11 +77,17 @@ pip install -r skills/sigma-navigable-erd/requirements.txt
 # 1. See it work with no credentials (fictional data)
 python3 examples/offline_demo.py
 
-# 2. Put your Sigma API credentials in a private file (see "Set up credentials safely")
-# 3. Check they work
+# 2. Tell it your Sigma API host (not a secret; yours depends on your Sigma cloud and region)
+mkdir -p ~/.sigma-lineage && chmod 700 ~/.sigma-lineage
+echo 'SIGMA_BASE_URL="https://api.sigmacomputing.com"' > ~/.sigma-lineage/credentials.env
+
+# 3. Sign in once with your browser (no API client or secret needed)
+python3 skills/sigma-navigable-erd/scripts/run.py login
+
+# 4. Check it works
 python3 skills/sigma-navigable-erd/scripts/run.py check
 
-# 4. Trace a workbook: paste its URL, its url-id, or its UUID
+# 5. Trace a workbook: paste its URL, its url-id, or its UUID
 python3 skills/sigma-navigable-erd/scripts/run.py trace "https://app.sigmacomputing.com/<org>/workbook/<name>-<urlId>"
 ```
 
@@ -92,54 +98,95 @@ The script prints where it saved the page. Open `standalone.html` from that fold
 ## Requirements
 
 - **Python 3.9 or newer** and **PyYAML** (`pip install -r skills/sigma-navigable-erd/requirements.txt`). Nothing else: the tool uses only the standard library otherwise.
-- **A Sigma API client** (client ID and secret) for the organization that holds the workbook. In Sigma, create one under Administration, Developer Access. The client acts as the user who created it, so that user must be able to **view the workbook and the data models behind it**. A dedicated read-only service user is a good choice.
+- **A Sigma sign-in** for the organization that holds the workbook. By default you **sign in once with your browser** and the tool acts as you: there is no secret to create or store. Your account type may need the **Use Sigma API with OAuth** permission (Sigma documents this for its CLI). If browser sign-in is not available to you, or for unattended runs, use an **API client** (client ID and secret; in Sigma, Administration, Developer Access) instead. Either way, the person signed in (or the user who owns the client) must be able to **view the workbook and the data models behind it**.
 - **Your Sigma API host.** It depends on your Sigma cloud and region. Examples: `https://api.sigmacomputing.com`, `https://aws-api.sigmacomputing.com`, `https://api.us-a.aws.sigmacomputing.com`, `https://api.eu.aws.sigmacomputing.com`, `https://api.uk.sigmacomputing.com`, `https://api.ca.sigmacomputing.com`, `https://api.az.sigmacomputing.com`. These are examples; confirm yours in Sigma's API documentation. The tool refuses any host that is not an HTTPS `*.sigmacomputing.com` host.
-- **A browser** to open the result.
+- **A browser** to sign in (once) and to open the result.
 
 ---
 
-## Set up credentials safely
+## Sign in
 
-The tool reads credentials from environment variables or from an env file. It never accepts them as command-line flags, so they do not appear in your shell history or process list.
+The tool is read-only and needs to read your workbook, so it needs a Sigma sign-in. It supports two ways, with the browser as the default and API client credentials as the fallback.
 
-Create `~/.sigma-lineage/credentials.env` yourself:
+| | Browser sign-in (default) | API client credentials (fallback) |
+|---|---|---|
+| Setup | `run.py login`, once | Create a client in Sigma (needs an admin) and save its ID and secret |
+| Acts as | You | The user who owns the client |
+| Secret you must protect | None. The session is kept in your OS keychain. | A long-lived client secret in a private file |
+| Good for | People at a keyboard | Unattended runs, scheduled jobs, machines with no browser |
+
+**Which one it uses.** `--auth-mode` (or `SIGMA_AUTH_MODE`) chooses:
+
+- `auto` (default): a saved browser sign-in first; then API client credentials if they are set; then, if you are at a terminal, it offers to sign you in through the browser.
+- `browser`: the saved browser sign-in only.
+- `client-credentials`: API client credentials only.
+
+A valid token in the `SIGMA_API_TOKEN` environment variable is used as is, in any mode. For example, Sigma's own CLI can print one.
+
+### Browser sign-in
+
+1. Tell the tool your Sigma API host. It depends on your Sigma cloud and region (examples: `https://api.sigmacomputing.com`, `https://aws-api.sigmacomputing.com`, `https://api.us-a.aws.sigmacomputing.com`, `https://api.eu.aws.sigmacomputing.com`; confirm yours in Sigma's API documentation). The host is not a secret. Either pass `--base-url`, or save it once:
+
+   ```bash
+   mkdir -p ~/.sigma-lineage && chmod 700 ~/.sigma-lineage
+   echo 'SIGMA_BASE_URL="https://api.sigmacomputing.com"' > ~/.sigma-lineage/credentials.env
+   ```
+
+2. Sign in. A browser tab opens; sign in to Sigma and return to the terminal:
+
+   ```bash
+   python3 skills/sigma-navigable-erd/scripts/run.py login
+   ```
+
+3. Check it: `python3 skills/sigma-navigable-erd/scripts/run.py check`. It shows how it signed in and who you are.
+
+From then on `trace` reuses the saved session and refreshes it quietly. To forget it: `run.py logout`.
+
+**Where the session is kept.** In the macOS Keychain, or on Linux in the keyring through `secret-tool`. It is never written to a project folder. On a machine with no keychain (for example Windows) the tool says so, and you can opt in to a private file in `~/.sigma-lineage/` (mode 600) with `SIGMA_OAUTH_STORE=file`.
+
+**How it works.** The tool follows the standard OAuth discovery that Sigma's API advertises: it reads the sign-in endpoints from the API itself, registers itself as a public client with no secret (RFC 7591), signs you in with the authorization code flow and PKCE (RFC 7636), and receives the result on a one-time loopback address on your own machine (RFC 8252). It then verifies the token against the API before using it. It only talks to HTTPS `sigmacomputing.com` hosts, including every endpoint it discovers, and it never follows redirects. Details are in `skills/sigma-navigable-erd/scripts/auth.py`.
+
+**An honest caveat.** Sigma documents browser sign-in for its own CLI and MCP server. It does not document this exact handshake for third-party tools, so it is the preferred route but could change. If your organization or account type does not allow it, `run.py login` says so and you can use API client credentials.
+
+### API client credentials (the fallback)
+
+Create a client in Sigma (Administration, Developer Access), then add it to the same private file, and lock the file down:
 
 ```bash
-mkdir -p ~/.sigma-lineage && chmod 700 ~/.sigma-lineage
-cat > ~/.sigma-lineage/credentials.env <<'EOF'
-SIGMA_BASE_URL="https://api.sigmacomputing.com"
+cat >> ~/.sigma-lineage/credentials.env <<'EOF'
 SIGMA_CLIENT_ID="your-client-id"
 SIGMA_CLIENT_SECRET="your-client-secret"
 EOF
 chmod 600 ~/.sigma-lineage/credentials.env
 ```
 
-- The tool **refuses to run if the file is readable by other users** and tells you to `chmod 600` it.
-- Use `--env-file PATH` or the `SIGMA_ENV_FILE` environment variable to keep the file somewhere else, for example one file per Sigma organization.
-- Or export the three variables in your shell instead of using a file.
-- **Never paste the secret into a chat with an AI assistant.** If you do by accident, treat it as exposed and rotate the key in Sigma.
-
-Check it works without tracing anything:
-
-```bash
-python3 skills/sigma-navigable-erd/scripts/run.py check
-```
-
----
+- The tool **refuses to run if a file holding a secret is readable by other users** and tells you to `chmod 600` it. A file with only the API host is not sensitive and is not checked.
+- Use `--env-file PATH` or `SIGMA_ENV_FILE` to keep the file elsewhere, for example one per Sigma organization. Or export the variables in your shell.
+- Credentials are never accepted as command-line flags, so they do not appear in your shell history or process list.
+- **Never paste a secret or token into a chat with an AI assistant.** If you do by accident, treat it as exposed and rotate it in Sigma.
 
 ## Use it from the command line
 
 No AI is needed. Everything is a normal Python script.
 
 ```text
-run.py check [--env-file FILE]
-run.py trace <workbook URL | url-id | UUID> [--env-file FILE] [--out DIR] [--owners owners.json] [--title TITLE]
+run.py login  [--base-url URL] [--env-file FILE]
+run.py logout [--base-url URL] [--env-file FILE]
+run.py check  [--auth-mode MODE] [--base-url URL] [--env-file FILE]
+run.py trace <workbook URL | url-id | UUID> [--auth-mode MODE] [--base-url URL] [--env-file FILE]
+                                            [--out DIR] [--owners owners.json] [--title TITLE]
 ```
 
-| Option | Meaning |
+| Command or option | Meaning |
 |---|---|
+| `login` | Sign in with your browser and save the session in your OS keychain. |
+| `logout` | Forget the saved browser sign-in. API client credentials are not affected. |
+| `check` | Verify the sign-in and host, and say how it signed in, without tracing anything. |
+| `trace` | Trace a workbook and save the results. |
 | `target` | The workbook. A full URL, the url-id at the end of it, or the workbook UUID all work. |
-| `--env-file FILE` | Credentials file. Defaults to `$SIGMA_ENV_FILE`, then `~/.sigma-lineage/credentials.env`. |
+| `--auth-mode` | `auto` (default), `browser`, or `client-credentials`. See [Sign in](#sign-in). |
+| `--base-url` | Your Sigma API host, if it is not in `SIGMA_BASE_URL`. |
+| `--env-file FILE` | Settings file. Defaults to `$SIGMA_ENV_FILE`, then `~/.sigma-lineage/credentials.env`. |
 | `--out DIR` | Central output folder. Defaults to `~/sigma-lineage`. Point it at a synced team folder to share runs. |
 | `--owners FILE` | JSON mapping warehouse table prefixes to an owner. See [Ownership](#ownership). |
 | `--title TITLE` | Page title. Defaults to "Navigable Entity Relationship Diagram". |
@@ -309,7 +356,7 @@ Keys are `DATABASE`, `DATABASE.SCHEMA`, or `DATABASE.SCHEMA.TABLE` prefixes. The
 
 ## How it works
 
-1. **Resolve** the workbook from a URL, url-id or UUID (a paged search of the files the API user can see).
+1. **Sign in** (browser OAuth by default, API client credentials as the fallback), then **resolve** the workbook from a URL, url-id or UUID (a paged search of the files you can see).
 2. **Read** the workbook spec and every data model it uses (`/spec`, `/lineage`, owners via `/members`). Data models are followed recursively as they are discovered.
 3. **Trace** each column of each table-like element. A formula that is exactly one `[Source/Column]` reference is a pass-through. Anything else is a calculation, recorded with the object, element, formula and owner. References are resolved through the element's sources, then through other elements in the same object (for example `Lookup([Other Table/Col], …)`), then through the object's lineage list when a source element is not exposed by the API.
 4. **Build a graph:** each column is a node with its location, owner, formula, a link, and the nodes it reads from. Warehouse columns, custom SQL, input tables and hidden upstream elements are terminal nodes.
@@ -318,14 +365,15 @@ Keys are `DATABASE`, `DATABASE.SCHEMA`, or `DATABASE.SCHEMA.TABLE` prefixes. The
 
 ### Sigma API endpoints used
 
-`POST /v2/auth/token`, `GET /v2/whoami`, `GET /v2/files` (resolve a URL), `GET /v2/workbooks/{id}` and `/spec` and `/lineage`, `GET /v2/dataModels/{id}` and `/spec` and `/lineage`, `GET /v2/members/{id}`, `POST /v2/connection/{id}/lookup` (find a table, a lookup only), `GET /v2/connections/tables/{id}/columns`. Nothing is created, changed or deleted.
+Sign-in: the standard OAuth discovery documents the API advertises, the authorization server's registration, authorize and token endpoints (browser sign-in), or `POST /v2/auth/token` (client credentials). Data: `GET /v2/whoami`, `GET /v2/files` (resolve a URL), `GET /v2/workbooks/{id}` and `/spec` and `/lineage`, `GET /v2/dataModels/{id}` and `/spec` and `/lineage`, `GET /v2/members/{id}`, `POST /v2/connection/{id}/lookup` (find a table, a lookup only), `GET /v2/connections/tables/{id}/columns`. Nothing is created, changed or deleted.
 
 ### Repository layout
 
 ```text
 skills/sigma-navigable-erd/     the skill (SKILL.md) and the code
   SKILL.md                      instructions for an AI assistant (also readable as a user guide)
-  scripts/run.py                command-line entry point (check, trace)
+  scripts/run.py                command-line entry point (login, logout, check, trace)
+  scripts/auth.py               sign-in: browser OAuth by default, client credentials as the fallback
   scripts/blame.py              the tracer: workbook and data models to a column graph
   scripts/recommend.py          the recommendation engine
   scripts/render.py             renders the page
@@ -333,10 +381,10 @@ skills/sigma-navigable-erd/     the skill (SKILL.md) and the code
   owners.example.json           example warehouse owner mapping
   requirements.txt              PyYAML
 examples/
-  fake_sigma.py                 a fictional Sigma API and workbook ("Acme Retail") for demos and tests
+  fake_sigma.py                 a fictional Sigma API, authorization server and workbook ("Acme Retail") for demos and tests
   offline_demo.py               runs the full tool against it with no network or credentials
   sample-output/                a ready-made result you can open
-tests/test_offline.py           end-to-end tests (standard library only)
+tests/                          end-to-end and sign-in tests (standard library only)
 docs/using-with-other-llms.md   recipes for non-Claude assistants
 AGENTS.md                       instructions for coding agents working with this repo
 .claude-plugin/                 Claude Code plugin and marketplace manifests
@@ -347,11 +395,13 @@ AGENTS.md                       instructions for coding agents working with this
 ## Privacy and security
 
 - **Read-only.** It never changes a workbook, data model, permission or connection.
-- **Credentials** come from an env file or environment variables only, never from flags, and the tool refuses a file other users can read.
-- **Host allowlist.** The client secret is only ever sent to an HTTPS `*.sigmacomputing.com` host. Any other host is refused before a request is made.
-- **No telemetry, no third-party services.** The only network calls are to your Sigma API host. The generated page fetches two fonts from Google Fonts when opened and works without them.
+- **Browser sign-in keeps no secret.** The session lives in your OS keychain, never in a project folder, and secrets are passed to the keychain tools on stdin, not on a command line. Refresh tokens rotate, so the replacement is saved before it is used. `run.py logout` removes the local session. (It does not revoke the session on Sigma's side, so an admin can still do that if needed.)
+- **API client credentials** come from an env file or environment variables only, never from flags, and the tool refuses a file that holds a secret and is readable by other users.
+- **Tokens are never printed or logged,** and every new token is verified against the API before it is used.
+- **Host allowlist.** Credentials and tokens are only ever sent to an HTTPS `*.sigmacomputing.com` host. That includes every endpoint found during OAuth discovery: anything else is refused before a request is made. Requests never follow redirects, so a token cannot be forwarded elsewhere.
+- **No telemetry, no third-party services.** The only network calls are to Sigma (your API host and its sign-in endpoints), plus a loopback listener on your own machine while you sign in. The generated page fetches two fonts from Google Fonts when opened and works without them.
 - **The output is sensitive.** It includes formulas, table paths and people's names. Treat it like the workbook itself. Do not commit generated runs to a public repository. The repository's `.gitignore` excludes `sigma-lineage/`, `.env` and `*.env`.
-- **Repository hygiene is tested.** One of the tests fails if a credential-shaped value or a company-specific reference appears anywhere in the repository.
+- **Repository hygiene is tested.** One of the tests fails if a credential-shaped value, a non-example email address, a local file path or an internal link appears anywhere in the repository.
 
 ---
 
@@ -359,6 +409,8 @@ AGENTS.md                       instructions for coding agents working with this
 
 - **Name-based tracing.** Columns are matched by name through formulas. Unusual naming, or two different columns with the same name, can mislead.
 - **Hidden upstream.** The API does not return every element of every data model. Where the chain reaches one, the trace stops at that model and says so. A user with view access to the data models gives the fullest result.
+- **Browser sign-in is not a documented contract.** Sigma documents browser sign-in for its CLI and MCP server but not this exact handshake for third-party tools. It needs your organization to allow it and, per Sigma's CLI documentation, an account type with the "Use Sigma API with OAuth" permission. API client credentials always work as the fallback. It has been verified against a real Sigma organization, but only on one cloud.
+- **Keychain support.** macOS Keychain and Linux `secret-tool` are supported. Elsewhere, opt in to a private file with `SIGMA_OAUTH_STORE=file`.
 - **Sigma objects only.** It traces down to the warehouse table. It does not trace lineage inside the warehouse (dbt or SQL models).
 - **Scope.** It follows the workbook and the data models it draws from. Other workbooks that use the same models are not scanned.
 - **Heuristics.** Recommendations can be wrong in both directions. A "redundant" lookup can hold different values from the column it duplicates, and logic that is truly duplicated can slip past the thresholds (for example formulas shorter than 25 characters).
@@ -371,10 +423,16 @@ AGENTS.md                       instructions for coding agents working with this
 
 | Symptom | Cause and fix |
 |---|---|
-| `… is readable by other users` | `chmod 600` the credentials file. |
-| `Refusing base URL …` | Use the HTTPS API host for your Sigma cloud. Only `*.sigmacomputing.com` hosts are allowed. |
-| `Missing SIGMA_CLIENT_ID …` | Put the three variables in the credentials file or export them. |
-| 401 or 403 | Wrong client or host, or the API user cannot see that object. |
+| `… holds a secret and is readable by other users` | `chmod 600` the credentials file. |
+| `Refusing API base URL …` | Use the HTTPS API host for your Sigma cloud. Only `*.sigmacomputing.com` hosts are allowed. |
+| `SIGMA_BASE_URL is not set` | Put your API host in the settings file, export it, or pass `--base-url`. |
+| `No Sigma sign-in is available` | Run `run.py login` in a terminal, or set `SIGMA_CLIENT_ID` and `SIGMA_CLIENT_SECRET`. |
+| `login` says browser sign-in is unavailable | That host or account cannot use it. Use API client credentials. |
+| `Sigma did not issue a token` after you signed in | Your account type may lack the "Use Sigma API with OAuth" permission. Ask a Sigma admin. |
+| `Sign-in timed out` | Finish the browser sign-in within two minutes, or run `login` again. |
+| `No OS keychain was found` | Set `SIGMA_OAUTH_STORE=file`, or use API client credentials. |
+| `Your saved Sigma sign-in has expired` | Run `run.py login` again. |
+| 401 or 403 | Wrong host, an expired or revoked sign-in, or the signed-in user cannot see that object. |
 | `Could not find a workbook …` | The link belongs to another organization, or the API user lacks access to it. |
 | Many "hidden upstream" columns | A data model the API user cannot fully read. Use a user with view access to those models. |
 | 429 or slow | The tool retries with backoff. Run again later for very large workbooks. |
@@ -387,15 +445,19 @@ AGENTS.md                       instructions for coding agents working with this
 
 ```bash
 pip install -r skills/sigma-navigable-erd/requirements.txt
-python3 -m unittest discover -s tests -v     # 23 tests, no network
+python3 -m unittest discover -s tests -v     # 54 tests, no network
 python3 examples/offline_demo.py             # regenerate examples/sample-output/
 ```
 
-The tests run the real tracer against `examples/fake_sigma.py`, a fictional workbook built to contain every kind of duplication the engine looks for, plus things that must not be flagged. To add a detector, add a case to the fixture and a test, then implement it in `recommend.py`.
+The tests run the real tracer against `examples/fake_sigma.py`, a fictional workbook built to contain every kind of duplication the engine looks for, plus things that must not be flagged. The sign-in tests run the real browser flow against a fake authorization server that checks PKCE, single-use refresh tokens and redirect URIs, with a fake browser that calls the real loopback listener. To add a detector, add a case to the fixture and a test, then implement it in `recommend.py`.
 
 Issues and pull requests are welcome. Please keep every example fictional: no real company names, people, URLs, workbook content or credentials.
 
 ---
+
+## Acknowledgments
+
+Thanks to [twells89/sigma-skills](https://github.com/twells89/sigma-skills), whose public write-up showed that Sigma's API advertises OAuth discovery and can be used with browser sign-in. This project's sign-in code (`auth.py`) was written independently from the public OAuth standards (RFC 9728, 8414, 7591, 7636 and 8252); no code or text was copied.
 
 ## License
 

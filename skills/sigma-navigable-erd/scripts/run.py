@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Build a column-level lineage + ownership page ("blame ERD") for a Sigma workbook.
+"""Build a column-level lineage + ownership page (Navigable Entity Relationship Diagram) for a Sigma workbook.
 
-  python3 run.py check [--env-file FILE]
-  python3 run.py trace <workbook URL | urlId | workbook UUID> [--env-file FILE] [--out DIR]
-                       [--owners owners.json] [--title TITLE]
+  python3 run.py login  [--base-url URL] [--env-file FILE]        sign in once with your browser
+  python3 run.py check  [--auth-mode MODE] [--env-file FILE]      verify the sign-in without tracing anything
+  python3 run.py trace <workbook URL | urlId | workbook UUID> [--auth-mode MODE] [--env-file FILE]
+                       [--out DIR] [--owners owners.json] [--title TITLE]
+  python3 run.py logout [--base-url URL] [--env-file FILE]        forget the saved browser sign-in
 
-Credentials come from environment variables or an env file (never command-line flags):
-  SIGMA_BASE_URL, SIGMA_CLIENT_ID, SIGMA_CLIENT_SECRET
-The env file defaults to $SIGMA_ENV_FILE, then ~/.sigma-lineage/credentials.env, and must be
-readable only by you (chmod 600). Everything is read-only (GET requests).
+Sign-in (--auth-mode or SIGMA_AUTH_MODE): `auto` (default) uses your saved browser sign-in, then API client
+credentials, then signs you in through the browser if you are at a terminal. `browser` and `client-credentials`
+force one method. A token already in SIGMA_API_TOKEN is used as is.
+
+Settings come from environment variables or an env file (never from command-line flags):
+  SIGMA_BASE_URL                           always needed: the API host for your Sigma cloud
+  SIGMA_CLIENT_ID, SIGMA_CLIENT_SECRET     only for the client-credentials fallback
+The env file defaults to $SIGMA_ENV_FILE, then ~/.sigma-lineage/credentials.env. A file that holds a client secret
+must be readable only by you (chmod 600). Everything is read-only.
 """
 import argparse, datetime, json, os, re, shutil, stat, sys, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import auth  # noqa: E402
 import blame  # noqa: E402
 import recommend  # noqa: E402
 from render import render_html  # noqa: E402
@@ -20,32 +28,38 @@ from render import render_html  # noqa: E402
 DEFAULT_ENV = os.path.expanduser("~/.sigma-lineage/credentials.env")
 DEFAULT_OUT = os.path.expanduser("~/sigma-lineage")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-NEEDED = ("SIGMA_BASE_URL", "SIGMA_CLIENT_ID", "SIGMA_CLIENT_SECRET")
 
 
 def load_env(path):
+    """Read KEY=value lines into the environment (existing variables win). Returns False if the file is absent."""
     if not os.path.exists(path):
         return False
-    mode = os.stat(path).st_mode
-    if mode & (stat.S_IRWXG | stat.S_IRWXO):
-        raise SystemExit(f"{path} is readable by other users. Run: chmod 600 {path}")
-    for line in open(path):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    with open(path) as fh:
+        pairs = []
+        for line in fh:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                pairs.append((k.strip(), v.strip().strip('"').strip("'")))
+    holds_secret = any(k in ("SIGMA_CLIENT_SECRET", "SIGMA_API_TOKEN") and v for k, v in pairs)
+    if holds_secret and os.name != "nt" and os.stat(path).st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise SystemExit(f"{path} holds a secret and is readable by other users. Run: chmod 600 {path}")
+    for k, v in pairs:
+        os.environ.setdefault(k, v)
     return True
 
 
-def setup(env_file):
+def setup(env_file, base_url=None, auth_mode=None):
     path = env_file or os.environ.get("SIGMA_ENV_FILE") or DEFAULT_ENV
     found = load_env(path)
-    missing = [k for k in NEEDED if not os.environ.get(k)]
-    if missing:
+    base = base_url or os.environ.get("SIGMA_BASE_URL")
+    if not base:
         where = path if found else f"{path} (not found)"
-        raise SystemExit("Missing " + ", ".join(missing) + f". Set them in {where} or the environment. "
-                         "See the skill's setup section. Never paste them into a chat.")
-    blame.configure(os.environ["SIGMA_BASE_URL"])
+        raise SystemExit("SIGMA_BASE_URL is not set. Put your Sigma API host in " + where + " or the environment, "
+                         "or pass --base-url. It depends on your Sigma cloud, for example https://api.sigmacomputing.com")
+    blame.configure(base)
+    blame.set_auth_mode(auth_mode)
+    return base
 
 
 def resolve_workbook(target):
@@ -97,17 +111,37 @@ def recommendations_md(d):
 
 
 def cmd_check(args):
-    setup(args.env_file)
+    setup(args.env_file, args.base_url, args.auth_mode)
+    tok = blame.token_info()
     who = json.loads(blame.api("/v2/whoami"))
-    print("Authenticated OK.")
+    print("Authenticated OK, using " + tok.method + ".")
     print("  API host:        ", blame.BASE)
     print("  Organization ID: ", who.get("organizationId"))
-    print("  API user ID:     ", who.get("userId"))
-    print("The workbook and its data models must be visible to this API user for a full trace.")
+    print("  User ID:         ", who.get("userId"))
+    print("The workbook and its data models must be visible to this user for a full trace.")
+
+
+def cmd_login(args):
+    base = setup(args.env_file, args.base_url)
+    try:
+        auth.login(base, interactive=True)
+    except auth.AuthError as e:
+        raise SystemExit(str(e))
+    blame.set_auth_mode("browser")
+    who = json.loads(blame.api("/v2/whoami"))
+    print("Signed in. The sign-in is saved in your OS keychain for " + base + ".")
+    print("  Organization ID: ", who.get("organizationId"))
+    print("  User ID:         ", who.get("userId"))
+
+
+def cmd_logout(args):
+    base = setup(args.env_file, args.base_url)
+    auth.forget_session(base)
+    print("Removed the saved browser sign-in for " + base + ". API client credentials are not affected.")
 
 
 def cmd_trace(args):
-    setup(args.env_file)
+    setup(args.env_file, args.base_url, args.auth_mode)
     overrides = {}
     if args.owners:
         overrides = {k: v for k, v in json.load(open(args.owners)).items() if not k.startswith("_")}
@@ -148,16 +182,24 @@ def cmd_trace(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("check", help="verify credentials and host without tracing anything")
-    c.add_argument("--env-file")
+
+    def common(p, mode=True):
+        p.add_argument("--env-file", help="settings file (default: $SIGMA_ENV_FILE, then ~/.sigma-lineage/credentials.env)")
+        p.add_argument("--base-url", help="Sigma API host, if not set in SIGMA_BASE_URL")
+        if mode:
+            p.add_argument("--auth-mode", choices=auth.AUTH_MODES, help="auto (default), browser, or client-credentials")
+
+    common(sub.add_parser("login", help="sign in with your browser and save the session"), mode=False)
+    common(sub.add_parser("logout", help="forget the saved browser sign-in"), mode=False)
+    common(sub.add_parser("check", help="verify the sign-in and host without tracing anything"))
     t = sub.add_parser("trace", help="trace a workbook and save the ERD page")
     t.add_argument("target", help="workbook URL, url-id, or UUID")
-    t.add_argument("--env-file")
+    common(t)
     t.add_argument("--out", default=DEFAULT_OUT, help=f"central output folder (default {DEFAULT_OUT})")
     t.add_argument("--owners", help="JSON file mapping warehouse table prefixes to owners")
     t.add_argument("--title", help="page title (default: 'Navigable Entity Relationship Diagram')")
     a = ap.parse_args()
-    {"check": cmd_check, "trace": cmd_trace}[a.cmd](a)
+    {"check": cmd_check, "trace": cmd_trace, "login": cmd_login, "logout": cmd_logout}[a.cmd](a)
 
 
 if __name__ == "__main__":
