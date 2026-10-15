@@ -132,9 +132,13 @@ def render_html(d, title=None):
 
     # ---- recommendations ---------------------------------------------------
     recs = d.get("recommendations", [])
-    rjs = json.dumps([{"i": r["id"], "t": r["type"], "s": r["sev"], "h": r["title"], "d": r["detail"], "a": r["action"],
+    rjs = json.dumps([{"i": r["id"], "t": r["type"], "s": r["sev"], "h": r["title"], "d": r["detail"], "a": r["action"], "p": r.get("verdict") or "", "q": r.get("confidence") or "",
+                       "x": r.get("evidence") or "", "y": r.get("verify") or "",
                        "n": [gidx[k] for k in r["nodes"] if k in gidx], "r": {str(gidx[k]): v for k, v in r.get("roles", {}).items() if k in gidx}, "o": r["owners"], "w": r["where"], "v": r["saves"]}
                       for r in recs], separators=(",", ":")).replace("</", "<\\/")
+
+    perf = d.get("perf") or {"available": False, "elements": [], "totals": {}, "verdicts": {}, "top": []}
+    pfjs = json.dumps({**perf, "note": d.get("compiled_note", "")}, separators=(",", ":")).replace("</", "<\\/")
 
     # ---- compact data for the explorer ----------------------------------------
     data = []
@@ -156,7 +160,7 @@ def render_html(d, title=None):
 
     TEMPLATE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "template.html")).read()
     out = (TEMPLATE.replace("@@TITLE@@", esc(wb["name"])).replace("@@PTITLE@@", esc(title or "Navigable Entity Relationship Diagram")).replace("@@SVG@@", "".join(svg)).replace("@@ROWS@@", rows)
-           .replace("@@DATA@@", js).replace("@@RECS@@", rjs).replace("@@NREC@@", str(len(recs))).replace("@@GRAPH@@", gjs).replace("@@NEL@@", str(len(d["elements"]))).replace("@@NCOL@@", f"{total:,}")
+           .replace("@@DATA@@", js).replace("@@RECS@@", rjs).replace("@@PERF@@", pfjs).replace("@@NREC@@", str(len(recs))).replace("@@GRAPH@@", gjs).replace("@@NEL@@", str(len(d["elements"]))).replace("@@NCOL@@", f"{total:,}")
            .replace("@@NRAW@@", f"{nraw:,}").replace("@@NCALC@@", f"{total-nraw:,}").replace("@@NPART@@", f"{npart:,}")
            .replace("@@NOBJ@@", str(len(objs))).replace("@@WBURL@@", esc(wb["url"] or "#"))
            .replace("@@PEOPLE@@", "".join(f'<option>{esc(p)}</option>' for p in people)))

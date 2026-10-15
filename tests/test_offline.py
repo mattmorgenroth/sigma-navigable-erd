@@ -43,8 +43,8 @@ class TraceTests(unittest.TestCase):
 
     def test_every_column_is_traced(self):
         cols = [c for e in self.d["elements"] for c in e["columns"]]
-        self.assertEqual(len(self.d["elements"]), 5)
-        self.assertEqual(len(cols), 38)
+        self.assertEqual(len(self.d["elements"]), 6)
+        self.assertEqual(len(cols), 50)
         self.assertFalse([c["name"] for c in cols if c["unresolved"]])
 
     def test_pass_through_vs_calculated(self):
@@ -124,7 +124,9 @@ class TraceTests(unittest.TestCase):
     def test_clean_elements_are_not_flagged(self):
         flagged = " ".join(r["title"] + r["detail"] for r in self.recs)
         self.assertNotIn("Customer Dimension", flagged)
-        self.assertNotIn("Revenue Summary", flagged)
+        # Revenue Summary does share a join stack with Revenue by Segment (a performance finding), but it repeats no logic
+        duplication = " ".join(r["title"] + r["detail"] for r in self.recs if not r["type"].startswith("perf-"))
+        self.assertNotIn("Revenue Summary", duplication)
 
     def test_pass_through_only_overlap_is_not_a_duplicate(self):
         # Orders by Customer and the exports all read the ORDERS table, so they share plain column names.
@@ -170,6 +172,15 @@ class CliTests(unittest.TestCase):
             found = {os.path.basename(p) for root, _, files in os.walk(tmp) for p in files}
             self.assertTrue({"index.html", "standalone.html", "blame.json", "recommendations.md"} <= found)
 
+    def test_every_form_of_workbook_link_resolves(self):
+        base = fake_sigma.WB_URL
+        for link in (base, base + "/", base + "/edit", base + "/edit?:nodeId=eOrd", base + "?:nodeId=eOrd",
+                     base + "/tag/Production", base + "/tag/Production?:nodeId=eOrd&:customView=abc",
+                     base.replace("https://", "http://"), base.split("/workbook/")[1]):
+            self.assertEqual(run.resolve_workbook(link), fake_sigma.WB_ID, link)
+        with self.assertRaises(SystemExit):
+            run.resolve_workbook(fake_sigma.BASE_URL + "/workbook/Not-A-Real-Workbook-zzzzzzzz")
+
     def test_url_id_and_uuid_resolve_to_the_same_workbook(self):
         self.assertEqual(run.resolve_workbook(fake_sigma.WB_URL), fake_sigma.WB_ID)
         self.assertEqual(run.resolve_workbook(fake_sigma.WB_URLID), fake_sigma.WB_ID)
@@ -206,7 +217,8 @@ class HygieneTests(unittest.TestCase):
         r"(client_secret|api[_-]?key|token)\s*[=:]\s*[\"']?[0-9a-fA-F]{32,}"      # a credential-shaped value
         r"|[\w.+-]+@(?!example\.(com|org)\b)[\w-]+\.[a-z]{2,}"                  # any email that is not an example address
         r"|/Users/[\w.-]+/|/home/[\w.-]+/|C:\\Users\\"                          # a local machine path
-        r"|(slack\.com/archives|atlassian\.net|docs\.google\.com/document)",       # internal chat, ticket or document links
+        r"|(slack\.com/archives|atlassian\.net|docs\.google\.com/document)"       # internal chat, ticket or document links
+        r"|" + "|".join(("Rel" "IR", "hyper" "sheets?", "c4" "_\\w+", "mono" "-rust", "rr" "-debug", "ATT" "R-ization")),   # a vendor's internal vocabulary
         re.I)
 
     def test_no_secrets_contact_details_or_local_paths_in_any_file(self):

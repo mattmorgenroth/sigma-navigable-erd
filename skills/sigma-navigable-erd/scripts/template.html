@@ -77,6 +77,9 @@ details summary{cursor:pointer;color:var(--dp);font-size:.8rem}details pre{white
 .grec{border:1.5px solid var(--mm);background:var(--mmf);border-radius:8px;padding:12px 14px;margin:6px 0 10px;display:grid;gap:6px}
 .grec h3{margin:0;font-size:1rem;font-weight:600;text-wrap:balance}.grec p{margin:0;font-size:.86rem;max-width:95ch}
 .grec .meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:.8rem;color:var(--mut)}
+.subh{font-size:.95rem;margin:14px 0 8px;font-weight:600}
+.vd-likely{color:var(--cs);border-color:var(--cs)}.vd-may{color:var(--mm);border-color:var(--mm)}.vd-maint{color:var(--un);border-color:var(--un)}
+.rc .perf{color:var(--fg);font-size:.84rem}.rc .perf b{color:var(--dp)}
 .note{border:1px solid var(--mm);background:var(--mmf);padding:12px 16px;border-radius:8px;font-size:.88rem}.note ul{margin:4px 0 0;padding-left:20px}
 </style>
 <main>
@@ -104,10 +107,23 @@ details summary{cursor:pointer;color:var(--dp);font-size:.8rem}details pre{white
 <div id="rstats" class="rstats"></div>
 <div id="rbody" hidden>
 <p class="mut">These are heuristics, so each finding says what to check before acting.</p>
-<div class="ctl"><label>Type<select id="rtype"><option value="">All</option><option value="lookup">Redundant lookup</option><option value="multi-lookup">Repeated lookups</option><option value="dup-formula">Same formula repeated</option><option value="dup-element">Near-duplicate elements</option><option value="dead-column">Unused hidden columns</option></select></label>
+<div class="ctl"><label>Type<select id="rtype"><option value="">All</option><option value="lookup">Redundant lookup</option><option value="multi-lookup">Repeated lookups</option><option value="dup-formula">Same formula repeated</option><option value="dup-element">Near-duplicate elements</option><option value="dead-column">Unused hidden columns</option><option value="perf-shared-joins">Shared join stack</option><option value="perf-repeated-scan">Repeated table reads</option><option value="perf-uncertain-lookups">Uncertain lookups</option><option value="perf-wrapped-key">Wrapped lookup key</option><option value="perf-shared-subexpression">Repeated costly logic</option></select></label>
 <label>Impact<select id="rsev"><option value="">All</option><option value="high">High</option><option value="med">Medium</option><option value="low">Low</option></select></label>
+<label>Performance<select id="rperf"><option value="">All</option><option>Likely faster</option><option>May be faster</option><option>Mostly maintainability</option></select></label>
 <label>Owner<select id="rwho"><option value="">Anyone</option>@@PEOPLE@@</select></label></div>
 <p id="rsum" class="mut"></p><div id="rlist" class="rlist"></div>
+</div></section>
+
+<section id="perf" class="sec">
+<h2 class="sech"><button id="ptoggle" class="rtoggle" type="button" aria-expanded="false" aria-controls="pbody"><span class="chev" aria-hidden="true"></span>Performance outlook</button></h2>
+<p class="rwhy">An opinion on which consolidations are likely to make the SQL Sigma generates cheaper, and which only tidy the workbook. It reads the generated SQL for every element (joins, repeated table reads, repeated costly calls, lookups that are not provably one row) and the formulas behind it. The numbers rank elements against each other. They are not run times.</p>
+<p id="pnote" class="mut" hidden></p>
+<div id="pstats" class="rstats"></div>
+<div id="pbody" hidden>
+<h3 class="subh">Best opportunities</h3><div id="ptop" class="rlist"></div>
+<h3 class="subh">Heaviest elements</h3>
+<div class="tw"><table><thead><tr><th>Element</th><th>Weight</th><th>Joins</th><th>Tables</th><th>Repeat reads</th><th>Windows</th><th>Regex</th><th>JSON</th><th>AI calls</th><th>Guarded lookups</th></tr></thead><tbody id="ptbl"></tbody></table></div>
+<p class="mut">Weight is a ranking index built from those counts (a join counts 3, a repeated table read 4, a window 2, an AI call 50, and so on). It is only for comparing elements in this workbook.</p>
 </div></section>
 
 <section><h2>Object lineage</h2>
@@ -137,6 +153,7 @@ details summary{cursor:pointer;color:var(--dp);font-size:.8rem}details pre{white
 var D=@@DATA@@;
 var G=@@GRAPH@@;
 var RC=@@RECS@@;
+var PF=@@PERF@@;
 var $=function(i){return document.getElementById(i)};
 var el=$('el');D.forEach(function(e,i){var o=document.createElement('option');o.value=i;o.textContent=e.n+' ('+e.c.length+')';el.appendChild(o)});
 var ALL=document.createElement('option');ALL.value='all';ALL.textContent='All elements';el.insertBefore(ALL,el.firstChild);
@@ -170,15 +187,17 @@ el.value='all';render();
 $('rows').addEventListener('click',function(ev){var b=ev.target.closest('button[data-n]');if(b){focusNode(+b.getAttribute('data-n'),true);$('trace').scrollIntoView({behavior:'smooth'})}});
 
 /* ---- recommendations ---- */
-var TYPE={'lookup':'Redundant lookup','multi-lookup':'Repeated lookups','dup-formula':'Same formula repeated','dup-element':'Near-duplicate elements','dead-column':'Unused hidden columns'};
+var TYPE={'lookup':'Redundant lookup','multi-lookup':'Repeated lookups','dup-formula':'Same formula repeated','dup-element':'Near-duplicate elements','dead-column':'Unused hidden columns','perf-shared-joins':'Shared join stack','perf-repeated-scan':'Repeated table reads','perf-uncertain-lookups':'Uncertain lookups','perf-wrapped-key':'Wrapped lookup key','perf-shared-subexpression':'Repeated costly logic'};
+var VCLS={'Likely faster':'likely','May be faster':'may','Mostly maintainability':'maint'};
 var SEVL={high:'High',med:'Medium',low:'Low'};
 function renderRecs(){
- var ty=$('rtype').value,sv_=$('rsev').value,who=$('rwho').value,out=[],n=0,CAP=60;
+ var ty=$('rtype').value,sv_=$('rsev').value,who=$('rwho').value,pf_=$('rperf').value,out=[],n=0,CAP=60;
  RC.forEach(function(r){
-  if(ty&&r.t!==ty)return; if(sv_&&r.s!==sv_)return; if(who&&r.o.indexOf(who)<0)return;
+  if(ty&&r.t!==ty)return; if(sv_&&r.s!==sv_)return; if(who&&r.o.indexOf(who)<0)return; if(pf_&&r.p!==pf_)return;
   n++; if(out.length>=CAP)return;
-  out.push('<div class="rc"><div class="meta"><span class="pill sev-'+r.s+'">'+SEVL[r.s]+'</span><span>'+esc(TYPE[r.t]||r.t)+'</span><span>Saves: '+esc(r.v)+'</span></div>'
+  out.push('<div class="rc"><div class="meta"><span class="pill sev-'+r.s+'">'+SEVL[r.s]+'</span>'+(r.p?'<span class="pill vd-'+VCLS[r.p]+'">'+esc(r.p)+'</span>':'')+'<span>'+esc(TYPE[r.t]||r.t)+'</span><span>Saves: '+esc(r.v)+'</span></div>'
    +'<h3>'+esc(r.h)+'</h3><p>'+esc(r.d)+'</p><p class="do"><b>Do:</b> '+esc(r.a)+'</p>'
+   +(r.p?'<p class="perf"><b>Performance:</b> '+esc(r.p)+(r.q?' ('+esc(r.q)+')':'')+'. '+(r.x?esc(r.x)+'. ':'')+(r.y?'<span class="mut">How to check: '+esc(r.y)+'</span>':'')+'</p>':'')
    +'<div class="meta">'+(r.o.length?'Involve: '+r.o.map(function(p){return '<span class="chip">'+esc(p)+'</span>'}).join(''):'')
    +(r.n.length?'<button class="btn" type="button" data-ri="'+r.i+'">Show involved cards</button> ':'')+r.n.slice(0,2).map(function(i){return '<button class="btn" type="button" data-r="'+i+'">Trace '+esc(sv(NN[i][3]))+'</button>'}).join(' ')+'</div></div>');
  });
@@ -186,7 +205,7 @@ function renderRecs(){
  var hi=RC.filter(function(r){return r.s==='high'}).length;
  $('rsum').innerHTML='<b>'+n+'</b> shown of '+RC.length+' ('+hi+' high impact).'+(n>CAP?' Showing the first '+CAP+'.':'');
 }
-['rtype','rsev','rwho'].forEach(function(i){$(i).addEventListener('change',renderRecs)});
+['rtype','rsev','rwho','rperf'].forEach(function(i){$(i).addEventListener('change',renderRecs)});
 $('rlist').addEventListener('click',function(ev){
  var b=ev.target.closest('button[data-r]');if(b){focusNode(+b.getAttribute('data-r'),true);$('trace').scrollIntoView({behavior:'smooth'});return}
  var c=ev.target.closest('button[data-ri]');if(c){var rr=recById(c.getAttribute('data-ri'));focusNode(rr.n[0],true,rr.i);$('trace').scrollIntoView({behavior:'smooth'})}});
@@ -293,7 +312,7 @@ function focusNode(f,push,recId){
  if(rec){
   var rc={};Object.keys(rec.r||{}).forEach(function(k){rc[rec.r[k]]=(rc[rec.r[k]]||0)+1});
   gr.hidden=false;
-  gr.innerHTML='<div class="meta"><span class="pill sev-'+rec.s+'">'+SEVL[rec.s]+'</span><b>'+esc(TYPE[rec.t]||rec.t)+'</b><span>Saves: '+esc(rec.v)+'</span></div>'
+  gr.innerHTML='<div class="meta"><span class="pill sev-'+rec.s+'">'+SEVL[rec.s]+'</span>'+(rec.p?'<span class="pill vd-'+VCLS[rec.p]+'">'+esc(rec.p)+(rec.q?' &middot; '+esc(rec.q):'')+'</span>':'')+'<b>'+esc(TYPE[rec.t]||rec.t)+'</b><span>Saves: '+esc(rec.v)+'</span></div>'
    +'<h3>'+esc(rec.h)+'</h3><p>'+esc(rec.d)+'</p><p><b>Do:</b> '+esc(rec.a)+'</p>'
    +'<div class="meta">Cards involved: '+Object.keys(rc).map(function(k){return '<span class="chip">'+rc[k]+' &times; '+esc(k)+'</span>'}).join('')
    +'<button class="btn" type="button" data-iso="off">Show full trace</button></div>';
@@ -326,4 +345,28 @@ renderStats();
 var wasOpen=false;try{wasOpen=localStorage.getItem('recsOpen')==='1'}catch(e){}
 setRecs(wasOpen,false);
 $('rtoggle').addEventListener('click',function(){setRecs($('rbody').hidden,true)});
+/* ---- performance outlook ---- */
+function renderPerf(){
+ var T=PF.totals||{},V=PF.verdicts||{};
+ if(PF.note){$('pnote').hidden=false;$('pnote').textContent=PF.note}
+ if(!PF.available){$('pstats').innerHTML='<p class="mut">No generated SQL was available, so there are no measured numbers. Recommendations still carry formula-based opinions.</p>'}
+ else{
+  var verdicts=['Likely faster','May be faster','Mostly maintainability'];
+  $('pstats').innerHTML='<div class="rrow"><div class="rstat"><b>'+PF.n_elements+'</b><span>queries read</span></div><div class="rstat"><b>'+(T.joins||0)+'</b><span>joins in total</span></div><div class="rstat"><b>'+(T.rescans||0)+'</b><span>repeat table reads</span></div><div class="rstat"><b>'+(T.guarded||0)+'</b><span>guarded lookups</span></div></div>'
+   +'<div class="rrow"><span class="rlabel">Findings</span>'+verdicts.map(function(v){return '<span class="pill vd-'+VCLS[v]+'">'+esc(v)+' &middot; '+(V[v]||0)+'</span>'}).join(' ')+'</div>';
+ }
+ $('ptop').innerHTML=(PF.top||[]).map(function(id){var r=recById(id);if(!r)return '';
+  return '<div class="rc"><div class="meta"><span class="pill vd-'+VCLS[r.p]+'">'+esc(r.p)+'</span><span>'+esc(r.q)+'</span><span>'+esc(TYPE[r.t]||r.t)+'</span><span>Saves: '+esc(r.v)+'</span></div><h3>'+esc(r.h)+'</h3><p>'+esc(r.d)+'</p>'
+   +(r.n.length?'<div class="meta"><button class="btn" type="button" data-ri="'+r.i+'">Show involved cards</button></div>':'')+'</div>'}).join('')||'<p class="mut">Nothing stands out as likely to change the generated SQL much.</p>';
+ $('ptbl').innerHTML=(PF.elements||[]).map(function(e){return '<tr><td>'+esc(e.name)+'</td><td class="n">'+e.cost+'</td><td class="n">'+e.joins+'</td><td class="n">'+e.tables+'</td><td class="n">'+e.rescans+'</td><td class="n">'+e.windows+'</td><td class="n">'+e.regex+'</td><td class="n">'+e.json+'</td><td class="n">'+e.ai+'</td><td class="n">'+e.guarded+'</td></tr>'}).join('');
+}
+function setPerf(open,save){
+ $('pbody').hidden=!open;$('ptoggle').setAttribute('aria-expanded',open?'true':'false');
+ if(save){try{localStorage.setItem('perfOpen',open?'1':'0')}catch(e){}}
+}
+renderPerf();
+var perfWasOpen=false;try{perfWasOpen=localStorage.getItem('perfOpen')==='1'}catch(e){}
+setPerf(perfWasOpen,false);
+$('ptoggle').addEventListener('click',function(){setPerf($('pbody').hidden,true)});
+$('ptop').addEventListener('click',function(ev){var c=ev.target.closest('button[data-ri]');if(c){var rr=recById(c.getAttribute('data-ri'));focusNode(rr.n[0],true,rr.i);$('trace').scrollIntoView({behavior:'smooth'})}});
 </script>

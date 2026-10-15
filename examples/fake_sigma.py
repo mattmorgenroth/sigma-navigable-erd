@@ -9,6 +9,9 @@ The fixture deliberately contains each kind of duplicated logic the recommendati
   * the same formula ("Order Size") written in three elements
   * two elements ("Orders Export" and its copy) that repeat the same five calculated columns
   * a hidden calculated column that nothing uses ("Scratch")
+  * a lookup that matches on a key wrapped in a function, and repeated regular-expression logic in two columns
+  * two summary elements whose generated SQL re-runs the same four-table join stack
+  The fake API also serves invented compiled SQL for every element, so the performance opinions can be exercised.
 It also contains things that must NOT be flagged: pass-through columns and a clean customer element.
 """
 import base64
@@ -70,6 +73,9 @@ def export_columns(prefix):
         col(f"{prefix}08", "Is Large", "[Amount] > 1000"),
         col(f"{prefix}09", "Order Year", 'DateTrunc("year", [Order Date])'),
         col(f"{prefix}10", "Margin", "([Amount] - [Cost]) / [Amount]"),
+        col(f"{prefix}11", "Region", "[ORDERS/Region]"),
+        col(f"{prefix}12", "Region Code", 'RegexpExtract([Region], "[A-Z]+")'),
+        col(f"{prefix}13", "Region Prefix", 'Lower(RegexpExtract([Region], "[A-Z]+"))'),
     ]
 
 
@@ -93,6 +99,9 @@ WORKBOOK = {
                      col("or07", "Customer Name", "Lookup([Customers/Name], [Customer Id], [Customers/Customer Id])"),
                      col("or08", "Customer Tier", "Lookup([Customers/Tier], [Customer Id], [Customers/Customer Id])"),
                      col("or09", "Customer Country", "Lookup([Customers/Country], [Customer Id], [Customers/Customer Id])"),
+                     col("or11", "Size Upper", 'Upper(If([Amount] > 100, "Big", "Small"))'),
+                     col("or12", "Size Lower", 'Lower(If([Amount] > 100, "Big", "Small"))'),
+                     col("or10", "Tier (text key)", "Lookup([Customers/Tier], Text([Customer Id]), Text([Customers/Customer Id]))"),
                      col("scratch01", "Scratch", "[Amount] * 2", hidden=True)]},
         {"id": "eExp", "kind": "table", "name": "Orders Export", "source": wh("ORDERS"), "columns": export_columns("ex")},
         {"id": "eExp2", "kind": "table", "name": "Orders Export (copy)", "source": wh("ORDERS"), "columns": export_columns("ey")},
@@ -101,6 +110,11 @@ WORKBOOK = {
          "columns": [col("rv01", "Order Id", "[Revenue/Order Id]"),
                      col("rv02", "Net Revenue", "[Revenue/Net Revenue]"),
                      col("rv03", "Revenue per Order", "Sum([Net Revenue]) / CountDistinct([Order Id])")]},
+        {"id": "eRevSeg", "kind": "table", "name": "Revenue by Segment",
+         "source": {"kind": "data-model", "dataModelId": DM_REV, "elementId": "dRev"},
+         "columns": [col("rs01", "Order Id", "[Revenue/Order Id]"),
+                     col("rs02", "Net Revenue", "[Revenue/Net Revenue]"),
+                     col("rs03", "Average Net Revenue", "Avg([Net Revenue])")]},
     ]},
 }
 
@@ -224,6 +238,36 @@ class FakeAuth:
 AUTH = FakeAuth()
 
 
+def _stack_sql(cols):
+    """Invented SQL for a summary element that re-expands a four-table join stack (five joins)."""
+    return ("select Q1.ORDER_ID, Q1.AMOUNT - Q1.DISCOUNT NET_REVENUE_1 " + cols +
+            " from ANALYTICS.MARTS.ORDERS Q1 left join ANALYTICS.MARTS.CUSTOMERS Q2 on Q1.CUSTOMER_ID = Q2.CUSTOMER_ID"
+            " left join ANALYTICS.MARTS.REGIONS Q3 on Q1.REGION = Q3.REGION"
+            " left join ANALYTICS.MARTS.PRODUCTS Q4 on Q1.ORDER_ID = Q4.ORDER_ID"
+            " left join (select CUSTOMER_ID, count(*) N from ANALYTICS.MARTS.CUSTOMERS group by CUSTOMER_ID) Q5 on Q1.CUSTOMER_ID = Q5.CUSTOMER_ID"
+            " left join ANALYTICS.MARTS.REGIONS Q6 on Q2.REGION = Q6.REGION limit 1000")
+
+
+def compiled_sql():
+    """element id -> the SQL the fake compiler 'generated'. Invented, but shaped like the real thing."""
+    lookup = ("left join (select CUSTOMER_ID K, min({c}) MIN_{n}, max({c}) MAX_{n} from ANALYTICS.MARTS.CUSTOMERS group by CUSTOMER_ID) Q{n} "
+              "on Q1.CUSTOMER_ID = Q{n}.K")
+    ord_sql = ("select Q1.ORDER_ID, Q1.AMOUNT, " +
+               ", ".join(f"iff(equal_null(min(Q{n}.MIN_{n}), max(Q{n}.MAX_{n})), max(Q{n}.MAX_{n}), null) V_{n}" for n in range(2, 7)) +
+               " from ANALYTICS.MARTS.ORDERS Q1 " +
+               " ".join(lookup.format(c=c, n=n) for n, c in zip(range(2, 6), ("SEGMENT", "NAME", "TIER", "COUNTRY"))) +
+               " left join (select CUSTOMER_ID::text K, min(TIER) MIN_6, max(TIER) MAX_6 from ANALYTICS.MARTS.CUSTOMERS group by 1) Q6 "
+               "on Q1.CUSTOMER_ID::text = Q6.K limit 1000")
+    export = ("select ORDER_ID, AMOUNT, regexp_substr(REGION, '[A-Z]+') REGION_CODE_1, lower(regexp_substr(REGION, '[A-Z]+')) REGION_PREFIX_2, "
+              "case when AMOUNT > 1000 then 'Large' else 'Small' end ORDER_SIZE_3 from ANALYTICS.MARTS.ORDERS limit 1000")
+    return {
+        "eCust": "select CUSTOMER_ID, NAME, SEGMENT, TIER, COUNTRY from ANALYTICS.MARTS.CUSTOMERS limit 1000",
+        "eOrd": ord_sql, "eExp": export, "eExp2": export,
+        "eRev": _stack_sql(", sum(Q1.AMOUNT) over (partition by Q1.REGION) PER_REGION_4"),
+        "eRevSeg": _stack_sql(", avg(Q1.AMOUNT) over () AVG_5"),
+    }
+
+
 def fake_http(path, data=None, headers=None, tries=4):
     """Drop-in replacement for blame.http that answers from the fixture above."""
     u = urllib.parse.urlparse(path)
@@ -237,6 +281,11 @@ def fake_http(path, data=None, headers=None, tries=4):
     if m:
         f, l, e = MEMBERS[m.group(1)]
         return json.dumps({"memberId": m.group(1), "firstName": f, "lastName": l, "email": e})
+    m = re.fullmatch(r"/v2/workbooks/([\w-]+)/queries", p)
+    if m:
+        names = {e["id"]: e["name"] for e in WORKBOOK["document"]["elements"]}
+        return json.dumps({"entries": [{"elementId": k, "name": names[k], "sql": v + "\n\n-- Sigma {\"request-id\":\"fake\"}"}
+                                       for k, v in compiled_sql().items()]})
     m = re.fullmatch(r"/v2/(workbooks|dataModels)/([\w-]+)/(spec|lineage)", p)
     if m:
         oid = m.group(2)

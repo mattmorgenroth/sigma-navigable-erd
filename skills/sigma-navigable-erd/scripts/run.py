@@ -4,7 +4,7 @@
   python3 run.py login  [--base-url URL] [--env-file FILE]        sign in once with your browser
   python3 run.py check  [--auth-mode MODE] [--env-file FILE]      verify the sign-in without tracing anything
   python3 run.py trace <workbook URL | urlId | workbook UUID> [--auth-mode MODE] [--env-file FILE]
-                       [--out DIR] [--owners owners.json] [--title TITLE]
+                       [--out DIR] [--owners owners.json] [--title TITLE] [--no-sql]
   python3 run.py logout [--base-url URL] [--env-file FILE]        forget the saved browser sign-in
 
 Sign-in (--auth-mode or SIGMA_AUTH_MODE): `auto` (default) uses your saved browser sign-in, then API client
@@ -66,9 +66,10 @@ def resolve_workbook(target):
     """Accept a workbook UUID, a url-id, or a full workbook URL; return the workbook UUID."""
     if UUID.match(target):
         return target
-    path = urllib.parse.urlparse(target).path if "://" in target else target
-    seg = [p for p in path.split("/") if p][-1] if path else target
-    seg = seg.split("?")[0]
+    path = urllib.parse.urlparse(target).path if "://" in target else target.split("?")[0]
+    parts = [p for p in path.split("/") if p]
+    # a workbook link looks like .../workbook/<name>-<urlId>[/edit | /tag/<tag>][?query]: take what follows "workbook"
+    seg = parts[parts.index("workbook") + 1] if "workbook" in parts and parts.index("workbook") + 1 < len(parts) else (parts[-1] if parts else target)
     urlid = seg.split("-")[-1] if "-" in seg else seg
     page = None
     while True:
@@ -101,12 +102,34 @@ def standalone_html(page):
 
 def recommendations_md(d):
     recs = d.get("recommendations", [])
-    lines = [f"# Duplicate-logic recommendations: {d['workbook']['name']}", "",
-             f"{len(recs)} findings. Each is a heuristic; verify before removing.", ""]
-    for r in recs:
-        lines += [f"## [{r['sev'].upper()}] {r['title']}", f"- Type: {r['type']}  |  Saves: {r['saves']}",
-                  f"- Where: {'; '.join(r['where'])}", f"- Owners to involve: {', '.join(r['owners']) or 'n/a'}",
-                  f"- Why: {r['detail']}", f"- Do: {r['action']}", ""]
+    pf = d.get("perf") or {}
+    lines = [f"# Duplicate-logic and performance recommendations: {d['workbook']['name']}", "",
+             f"{len(recs)} findings. Each is a heuristic; verify before changing anything.", ""]
+    if pf.get("available"):
+        t = pf["totals"]
+        lines += ["## Performance outlook", "",
+                  f"Read the generated SQL for {pf['n_elements']} elements: {t['joins']} joins in total, {t['rescans']} repeated reads of "
+                  f"a table inside one query, {t['guarded']} values guarded against more than one match. The weights below rank "
+                  f"elements against each other; they are not run times.", ""]
+        v = pf.get("verdicts", {})
+        lines += ["Findings by verdict: " + ", ".join(f"{k}: {v.get(k, 0)}" for k in ("Likely faster", "May be faster", "Mostly maintainability")), ""]
+        by_id = {x["id"]: x for x in recs}
+        if pf.get("top"):
+            lines += ["Best opportunities, largest estimated saving first:", ""]
+            lines += [f"{n}. {by_id[i]['title']} ({by_id[i]['verdict']}, {by_id[i]['confidence']}; {by_id[i]['saves']})" for n, i in enumerate(pf["top"], 1)]
+            lines += [""]
+        lines += ["Heaviest elements (weight, joins, repeated reads):", ""]
+        lines += [f"- {e['name']}: {e['cost']:g}, {e['joins']} joins, {e['rescans']} repeated reads" for e in pf["elements"][:8]] + [""]
+    elif d.get("compiled_note"):
+        lines += ["## Performance outlook", "", d["compiled_note"], ""]
+    for r_ in recs:
+        lines += [f"## [{r_['sev'].upper()}] {r_['title']}",
+                  f"- Type: {r_['type']}  |  Saves: {r_['saves']}" + (f"  |  Performance: {r_['verdict']} ({r_['confidence']})" if r_.get("verdict") else ""),
+                  f"- Where: {'; '.join(r_['where'])}", f"- Owners to involve: {', '.join(r_['owners']) or 'n/a'}",
+                  f"- Why: {r_['detail']}", f"- Do: {r_['action']}"]
+        if r_.get("verdict"):
+            lines += [f"- Performance: {r_['evidence']}." + (f" How to check: {r_['verify']}" if r_.get("verify") else "")]
+        lines += [""]
     return "\n".join(lines)
 
 
@@ -147,7 +170,7 @@ def cmd_trace(args):
         overrides = {k: v for k, v in json.load(open(args.owners)).items() if not k.startswith("_")}
     wid = resolve_workbook(args.target)
     print("Tracing (this can take a minute or two for large workbooks)...")
-    d = blame.trace_workbook(wid, overrides)
+    d = blame.trace_workbook(wid, overrides, with_sql=not args.no_sql)
     d["recommendations"] = recommend.recommend(d)
     wb = d["workbook"]
     stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -169,7 +192,10 @@ def cmd_trace(args):
     with open(os.path.join(args.out, "INDEX.md"), "a") as f:
         f.write(f"- {stamp} | {wb['name']} | {host} | {summary} | {os.path.join(run_dir, 'index.html')}\n")
     s = recommend.summarize(d["recommendations"])
-    summary += f"; {s['total']} duplicate-logic recommendations ({s['by_sev'].get('high', 0)} high)"
+    summary += f"; {s['total']} recommendations ({s['by_sev'].get('high', 0)} high)"
+    v = (d.get("perf") or {}).get("verdicts", {})
+    if v:
+        summary += f", {v.get('Likely faster', 0)} likely to be faster, {v.get('May be faster', 0)} that may be"
     print(summary)
     print("Saved:", os.path.join(run_dir, "index.html"))
     print("Latest copy:", os.path.join(root, "latest", "index.html"))
@@ -198,6 +224,8 @@ def main():
     t.add_argument("--out", default=DEFAULT_OUT, help=f"central output folder (default {DEFAULT_OUT})")
     t.add_argument("--owners", help="JSON file mapping warehouse table prefixes to owners")
     t.add_argument("--title", help="page title (default: 'Navigable Entity Relationship Diagram')")
+    t.add_argument("--no-sql", action="store_true",
+                   help="do not read the SQL Sigma generates for each element (faster; performance opinions then use formulas only)")
     a = ap.parse_args()
     {"check": cmd_check, "trace": cmd_trace, "login": cmd_login, "logout": cmd_logout}[a.cmd](a)
 

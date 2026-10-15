@@ -1,11 +1,12 @@
 # Navigable Entity Relationship Diagram for Sigma
 
-Column-level lineage and ownership for any [Sigma](https://www.sigmacomputing.com) workbook, with recommendations for logic that is written more than once.
+Column-level lineage and ownership for any [Sigma](https://www.sigmacomputing.com) workbook, with recommendations for logic that is written more than once, and an opinion on which consolidations are likely to make the generated SQL cheaper.
 
 Point it at a workbook and it traces every column back through the workbook's elements and data models to the warehouse table. You get one searchable HTML page where you can click a column and see every column that feeds it, where each one lives, whether it is a plain pass-through or a calculation, and **who owns that layer**. It answers two questions that come up constantly:
 
 - **Who do I need to bring in?** When a number is wrong or a dashboard needs extending, the logic is often spread across a workbook and several data models owned by different people.
 - **What can I delete?** Duplicated lookups, the same formula pasted into five elements, and hidden columns nobody uses all add up.
+- **What is worth doing first?** Some duplication only tidies the workbook. Some makes Sigma run the same joins again and again. The tool tells you which is which, using the SQL Sigma generates.
 
 It runs as a skill inside [Claude](#use-it-with-claude), as a plain command-line tool you can use [without any AI at all](#use-it-from-the-command-line), or with [other LLMs and agents](#use-it-with-other-llms-and-agents).
 
@@ -28,6 +29,7 @@ It runs as a skill inside [Claude](#use-it-with-claude), as a plain command-line
 - [Share the results](#share-the-results)
 - [Reading the page](#reading-the-page)
 - [The recommendations](#the-recommendations)
+- [Performance opinions](#performance-opinions)
 - [Ownership](#ownership)
 - [How it works](#how-it-works)
 - [Privacy and security](#privacy-and-security)
@@ -48,6 +50,7 @@ Every run produces a self-contained page with these parts:
 | **Focus** and **Open** | Every card has **Focus** (make that column the new center of the diagram) and **Open ↗** (jump to that element in Sigma, in edit mode). |
 | **Recommendations** | A collapsible section (collapsed by default, with live statistics) listing duplicated logic that could be removed. Filter by type, impact or owner. |
 | **Isolate** | On any card named in a recommendation, one click reduces the diagram to just the cards that must change, each labelled with its role ("Remove this lookup", "Use this column instead", "Uses the lookup: re-point it"). The recommendation is pinned in a header above the diagram. |
+| **Performance outlook** | A collapsible section (collapsed by default, with live numbers) that ranks the best consolidation opportunities by likely effect on the generated SQL and lists the heaviest elements. Every recommendation also shows a verdict (Likely faster, May be faster, Mostly maintainability), whether it is measured or inferred, and how to check it. See [Performance opinions](#performance-opinions). |
 | **Object lineage** | A diagram of the workbook, the data models behind it, and the warehouse sources, with owners. |
 | **Who owns each object** | A roster of every workbook and data model in the chain, its owner, last editor, and how many columns have logic applied there. |
 | **Column blame table** | Every element's columns with a Pass-through or Calculated badge, the layers that apply logic (with formulas), and the origin. Filter by element, person, or text. Shows calculated columns only by default. |
@@ -174,7 +177,7 @@ run.py login  [--base-url URL] [--env-file FILE]
 run.py logout [--base-url URL] [--env-file FILE]
 run.py check  [--auth-mode MODE] [--base-url URL] [--env-file FILE]
 run.py trace <workbook URL | url-id | UUID> [--auth-mode MODE] [--base-url URL] [--env-file FILE]
-                                            [--out DIR] [--owners owners.json] [--title TITLE]
+                                            [--out DIR] [--owners owners.json] [--title TITLE] [--no-sql]
 ```
 
 | Command or option | Meaning |
@@ -187,6 +190,7 @@ run.py trace <workbook URL | url-id | UUID> [--auth-mode MODE] [--base-url URL] 
 | `--auth-mode` | `auto` (default), `browser`, or `client-credentials`. See [Sign in](#sign-in). |
 | `--base-url` | Your Sigma API host, if it is not in `SIGMA_BASE_URL`. |
 | `--env-file FILE` | Settings file. Defaults to `$SIGMA_ENV_FILE`, then `~/.sigma-lineage/credentials.env`. |
+| `--no-sql` | Skip reading the SQL Sigma generates (faster). Performance opinions then use formulas only. `trace` only. |
 | `--out DIR` | Central output folder. Defaults to `~/sigma-lineage`. Point it at a synced team folder to share runs. |
 | `--owners FILE` | JSON mapping warehouse table prefixes to an owner. See [Ownership](#ownership). |
 | `--title TITLE` | Page title. Defaults to "Navigable Entity Relationship Diagram". |
@@ -336,6 +340,36 @@ Things it deliberately does **not** flag: pass-through columns, elements that me
 
 ---
 
+## Performance opinions
+
+Beyond "is this duplicated?", the tool gives an opinion on **which consolidations are likely to make the SQL Sigma generates cheaper**, and which only tidy the workbook. The two are not the same. In the SQL Sigma generates:
+
+- **Every element compiles to its own query, and that query includes everything upstream of the element.** Elements do not share work with each other. If five elements sit on the same stack of joins, the stack runs five times.
+- **Inside one query, identical logic is generated once.** Repeating a whole formula within one element is usually free. Repeating it across elements is not.
+- **Columns nothing uses are left out of the SQL.** Deleting them tidies the workbook but does not speed up a query.
+- **A `Lookup()` becomes a join.** More lookups, more joins. A value Sigma cannot prove is a single value per key is wrapped in min/max with a null-safe comparison.
+- **A cast or function around a join key** hides the plain column from the optimizer.
+
+To ground the opinion in evidence, the tool reads the generated SQL for every element (`GET /v2/workbooks/{id}/queries`) and counts what costs something. It keeps only the counts and a short fragment of each repeated call, not the SQL.
+
+| Finding | What it means |
+|---|---|
+| **Shared join stack** | Two or more elements whose generated SQL joins the same tables (at least 3 tables, at least 4 joins each). The finding names the nearest element they all draw from, where the joins could be done once and materialized, notes if the stack already reads a materialized element, and estimates the joins saved. |
+| **Repeated table reads** | One query that reads the same table three or more times. |
+| **Uncertain lookups** | Five or more values in one element wrapped in min/max with a null-safe comparison. It could be a lookup that is not provably one row per key, or a grouped table. This one is labeled a hypothesis. |
+| **Wrapped lookup key** | A `Lookup()` that matches on a key with a function or cast around it. |
+| **Repeated costly logic** | The same expensive sub-expression (a regular expression, JSON parsing, a window, an aggregate, a lookup, an AI call) in two or more columns of one element. If one column already holds it, the others should call that column. Cheap logic is deliberately not reported. |
+
+Every recommendation, old and new, also carries:
+
+- **A verdict:** *Likely faster*, *May be faster*, or *Mostly maintainability* (tidier, but the query does not change).
+- **A confidence:** *Measured* when the generated SQL shows it, *Inferred* when only the formulas do.
+- **The evidence** behind it and **how to check it.**
+
+For example, an unused hidden column is *Mostly maintainability* because the compiler leaves it out, and the same formula in three elements is *Mostly maintainability* if it is cheap but *May be faster* if it is costly. Repeated costly logic that the generated SQL computes only once is downgraded to *Inferred* with a note that the compiler may already share it.
+
+The **Performance outlook** section ranks the best opportunities by verdict and then by estimated saving, and lists the heaviest elements. The weights are a ranking index (a join counts 3, a repeated table read 4, a window 2, an AI call 50, and so on). **They are not run times.** Confirm any change in Sigma's query history or your warehouse's query profile. Use `--no-sql` to skip reading the generated SQL; opinions then rest on formulas only and say so.
+
 ## Ownership
 
 "Owner" means the Sigma **owner of the workbook or data model** where the logic sits, and its last editor. It is the best place to start asking. It is not proof of who is responsible for the business logic, and it is not blame.
@@ -360,12 +394,12 @@ Keys are `DATABASE`, `DATABASE.SCHEMA`, or `DATABASE.SCHEMA.TABLE` prefixes. The
 2. **Read** the workbook spec and every data model it uses (`/spec`, `/lineage`, owners via `/members`). Data models are followed recursively as they are discovered.
 3. **Trace** each column of each table-like element. A formula that is exactly one `[Source/Column]` reference is a pass-through. Anything else is a calculation, recorded with the object, element, formula and owner. References are resolved through the element's sources, then through other elements in the same object (for example `Lookup([Other Table/Col], …)`), then through the object's lineage list when a source element is not exposed by the API.
 4. **Build a graph:** each column is a node with its location, owner, formula, a link, and the nodes it reads from. Warehouse columns, custom SQL, input tables and hidden upstream elements are terminal nodes.
-5. **Recommend:** the detectors in `recommend.py` walk the graph and the elements' source and column inventories (including full column lists for warehouse tables).
+5. **Recommend:** the detectors in `recommend.py` walk the graph and the elements' source and column inventories (including full column lists for warehouse tables). `perf.py` reads the SQL Sigma generates for each element and adds the performance findings and verdicts.
 6. **Render:** `render.py` fills a single-file HTML template with the graph and findings as embedded data. There is no server, no framework, and no build step.
 
 ### Sigma API endpoints used
 
-Sign-in: the standard OAuth discovery documents the API advertises, the authorization server's registration, authorize and token endpoints (browser sign-in), or `POST /v2/auth/token` (client credentials). Data: `GET /v2/whoami`, `GET /v2/files` (resolve a URL), `GET /v2/workbooks/{id}` and `/spec` and `/lineage`, `GET /v2/dataModels/{id}` and `/spec` and `/lineage`, `GET /v2/members/{id}`, `POST /v2/connection/{id}/lookup` (find a table, a lookup only), `GET /v2/connections/tables/{id}/columns`. Nothing is created, changed or deleted.
+Sign-in: the standard OAuth discovery documents the API advertises, the authorization server's registration, authorize and token endpoints (browser sign-in), or `POST /v2/auth/token` (client credentials). Data: `GET /v2/whoami`, `GET /v2/workbooks/{id}/queries` (the generated SQL, for performance opinions), `GET /v2/files` (resolve a URL), `GET /v2/workbooks/{id}` and `/spec` and `/lineage`, `GET /v2/dataModels/{id}` and `/spec` and `/lineage`, `GET /v2/members/{id}`, `POST /v2/connection/{id}/lookup` (find a table, a lookup only), `GET /v2/connections/tables/{id}/columns`. Nothing is created, changed or deleted.
 
 ### Repository layout
 
@@ -376,6 +410,7 @@ skills/sigma-navigable-erd/     the skill (SKILL.md) and the code
   scripts/auth.py               sign-in: browser OAuth by default, client credentials as the fallback
   scripts/blame.py              the tracer: workbook and data models to a column graph
   scripts/recommend.py          the recommendation engine
+  scripts/perf.py               performance opinions: reads the generated SQL and formulas, assigns verdicts
   scripts/render.py             renders the page
   scripts/template.html         the page template (HTML, CSS and JavaScript in one file)
   owners.example.json           example warehouse owner mapping
@@ -413,6 +448,7 @@ AGENTS.md                       instructions for coding agents working with this
 - **Keychain support.** macOS Keychain and Linux `secret-tool` are supported. Elsewhere, opt in to a private file with `SIGMA_OAUTH_STORE=file`.
 - **Sigma objects only.** It traces down to the warehouse table. It does not trace lineage inside the warehouse (dbt or SQL models).
 - **Scope.** It follows the workbook and the data models it draws from. Other workbooks that use the same models are not scanned.
+- **Performance opinions are not measurements of run time.** They count joins, repeated reads and costly calls in the generated SQL and rank elements against each other. Warehouse caching, data volume, join order and the optimizer's own choices are not visible to the tool. Treat a verdict as where to look first, and confirm in query history. Logic that exists only in a data model appears in the SQL of the workbook elements that use it, not on its own. Reading the generated SQL for a very large workbook can be slow; `--no-sql` skips it.
 - **Heuristics.** Recommendations can be wrong in both directions. A "redundant" lookup can hold different values from the column it duplicates, and logic that is truly duplicated can slip past the thresholds (for example formulas shorter than 25 characters).
 - **Display caps.** A column diagram shows up to about 140 columns (it says when it is capped). The column table shows up to 400 rows at a time; use the search box to narrow it.
 - **Very large workbooks** produce multi-megabyte pages. Claude Artifacts accept up to 16 MB.
@@ -445,7 +481,7 @@ AGENTS.md                       instructions for coding agents working with this
 
 ```bash
 pip install -r skills/sigma-navigable-erd/requirements.txt
-python3 -m unittest discover -s tests -v     # 54 tests, no network
+python3 -m unittest discover -s tests -v     # 94 tests, no network
 python3 examples/offline_demo.py             # regenerate examples/sample-output/
 ```
 

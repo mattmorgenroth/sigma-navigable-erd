@@ -9,6 +9,7 @@ import collections, hashlib, json, os, re, sys, time, urllib.error, urllib.parse
 import yaml
 
 import auth
+import perf
 
 NOOWNER = "Warehouse table (owner not set)"
 BASE = None
@@ -182,6 +183,7 @@ class Tracer:
     def __init__(self, overrides):
         self.memo, self.overrides = {}, overrides
         self.G = {}   # column graph: node id -> {k,o,e,c,f,w,u,ups,...}
+        self.F = {}   # node id -> full formula text of calculated columns (the graph keeps only a short preview)
 
     @staticmethod
     def eurl(o, eid):
@@ -280,6 +282,8 @@ class Tracer:
                        "u": self.eurl(obj, eid), "ups": ups, "hid": bool(col.get("hidden")),
                        "cid": col.get("id"), "idrefs": max(obj.idcount.get(col.get("id"), 1) - 1, 0)}
         r["ref"] = ref
+        if not plain and f:
+            self.F[ref] = f[:4000]
         self.memo[key] = r
         return r
 
@@ -475,7 +479,28 @@ def table_columns(conn, dotted):
         return None
 
 
-def trace_workbook(wid, overrides=None):
+def fetch_compiled(wid):
+    """Profile the SQL Sigma generates for each element. Returns ({element id: {name, profile}}, note)."""
+    out, token_, pages = {}, None, 0
+    try:
+        while True:
+            q = f"/v2/workbooks/{wid}/queries?limit=100" + (f"&pageToken={urllib.parse.quote(token_)}" if token_ else "")
+            page = json.loads(api(q))
+            for e in page.get("entries", []):
+                if e.get("sql"):
+                    out[e["elementId"]] = {"name": nm(e.get("name")), "profile": perf.profile_sql(e["sql"])}
+            token_ = page.get("nextPageToken")
+            pages += 1
+            if not token_ or pages > 50:
+                break
+    except urllib.error.HTTPError as e:
+        return {}, f"The generated SQL could not be read (HTTP {e.code}), so performance opinions use formulas only."
+    except Exception:
+        return {}, "The generated SQL could not be read, so performance opinions use formulas only."
+    return out, ("" if out else "The API returned no generated SQL, so performance opinions use formulas only.")
+
+
+def trace_workbook(wid, overrides=None, with_sql=True):
     """Trace every column of every table-like element in workbook `wid`. Returns the result dict."""
     overrides = overrides or {}
     OBJS.clear(); WH_PATHS.clear(); WH_CONN.clear(); NO_ACCESS.clear()
@@ -543,6 +568,8 @@ def trace_workbook(wid, overrides=None):
         names = table_columns(conn, dotted) if conn else None
         if names:
             table_cols[dotted] = names
+    compiled, compiled_note = fetch_compiled(wid) if with_sql else ({}, "Generated SQL was not read (skipped), so performance opinions use formulas only.")
     return {"workbook": {"id": wid, "name": wb.name, "owner": wb.owner, "url": wb.url},
-            "objects": objs, "edges": edges, "elements": elements, "graph": tr.G,
+            "objects": objs, "edges": edges, "elements": elements, "graph": tr.G, "formulas": tr.F,
+            "compiled": compiled, "compiled_note": compiled_note,
             "no_access": sorted(NO_ACCESS), "elem_meta": elem_meta, "elem_cols": elem_cols, "elem_src": elem_src, "table_cols": table_cols}

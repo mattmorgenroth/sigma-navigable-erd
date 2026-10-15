@@ -30,7 +30,8 @@ see every column that feeds it, where each one lives, whether it is a plain
 pass-through or a calculation, and who owns that layer. Use it to decide who to
 invite when something needs fixing or extending. It also flags logic that is written
 more than once (redundant lookups, repeated formulas, elements that repeat the same
-calculated columns, unused hidden columns) so you can remove it.
+calculated columns, unused hidden columns) so you can remove it, and gives an opinion on
+which consolidations are likely to make the SQL Sigma generates cheaper.
 
 What you need
 - Python 3.9+ and PyYAML (pip install -r requirements.txt)
@@ -87,7 +88,7 @@ Ready to set up, or already configured?
 ## 3. Run a trace
 
 ```
-python3 scripts/run.py trace "<workbook URL, url-id, or UUID>" [--owners owners.json] [--title "Custom page title"] [--out DIR]
+python3 scripts/run.py trace "<workbook URL, url-id, or UUID>" [--owners owners.json] [--title "Custom page title"] [--out DIR] [--no-sql]
 ```
 
 Takes a minute or two for large workbooks. Output goes to a central, organized folder (default `~/sigma-lineage`, change with `--out`, for example a synced team drive):
@@ -103,6 +104,22 @@ Takes a minute or two for large workbooks. Output goes to a central, organized f
 ```
 
 After the run, tell the user the counts printed by the script and where the page is saved. Offer to open it, then walk them through it: **Trace a column** (search, click, then **Focus** to re-center on any column in the chain or **Open** to jump to that element in Sigma), the owner roster, and the element-by-element table.
+
+### Performance opinions
+
+Alongside the duplicate-logic findings, every trace reads the SQL Sigma generates for each element (`GET /v2/workbooks/{id}/queries`, skipped with `--no-sql`) and forms an opinion on which consolidations are likely to make it cheaper. The **Performance outlook** section (collapsed by default, with live numbers) ranks the best opportunities and lists the heaviest elements, and `recommendations.md` includes the same. Every recommendation also carries a **verdict** (Likely faster, May be faster, Mostly maintainability), a **confidence** (Measured when the generated SQL shows it, Inferred when only formulas do), the evidence, and how to check it.
+
+What the generated SQL shows, which the opinions rest on: each element compiles to its own query that includes everything upstream, so elements do not share work with each other; inside one query identical logic is generated once; columns nothing uses are left out; a Lookup becomes a join; a cast or function around a join key hides the plain column from the optimizer.
+
+| Finding | What it means |
+|---|---|
+| Shared join stack | Elements whose generated SQL joins the same tables, so the stack runs once per element. Do the joins once in the nearest shared element and have the others read it (materialize it, or move it to a data model or the warehouse). |
+| Repeated table reads | One query reads the same table three or more times. |
+| Uncertain lookups | Five or more values guarded by min/max with a null-safe comparison. A hypothesis: confirm the key is unique first. |
+| Wrapped lookup key | A Lookup matching on a key with a function or cast around it. |
+| Repeated costly logic | The same expensive sub-expression in two or more columns of one element. Have the others call the column that holds it. Cheap logic is not reported. |
+
+Present verdicts as opinions: the weights rank elements against each other and are **not run times**. Tell the user to confirm a change in Sigma's query history or the warehouse's query profile. *Mostly maintainability* findings (for example unused columns, or cheap formulas repeated across elements) are worth doing for clarity but should not be sold as speed-ups.
 
 ### Duplicate-logic recommendations
 
@@ -136,6 +153,7 @@ Offer this after the first successful run. Do not publish anything without the u
 - **Owner** is the Sigma owner of the workbook or data model where the logic sits. It is the place to start asking, not proof of who is responsible for the business logic.
 - **Partial / hidden upstream** means the chain reaches a data model whose upstream element the API does not return. The model and its owner are shown instead.
 - **Tracing is name-based.** Columns are matched by name through formulas, so unusual naming can mislead.
+- **Performance verdicts** are opinions, not measurements of run time. *Measured* means the generated SQL shows the pattern, not that it was timed.
 - **Recommendations** are heuristics. Before removing anything, check that the values really match, and that nothing outside the traced workbook (other workbooks, saved views, actions) depends on it.
 - **Open links** open the object in edit mode at the element: `<object URL>/edit?:nodeId=<elementId>`. Workbook links are reliable; data-model links may not open the exact element. Viewers need edit access to land in the editor.
 
@@ -158,4 +176,4 @@ Offer this after the first successful run. Do not publish anything without the u
 
 ## What this does not do
 
-Read-only: it never changes a workbook, data model or permission. It does not trace lineage inside the warehouse (dbt or SQL models), only through Sigma objects down to the table. It cannot tell who is accountable for a table unless you provide an owners file.
+Read-only: it never changes a workbook, data model or permission. It does not time queries or read warehouse query profiles. It does not trace lineage inside the warehouse (dbt or SQL models), only through Sigma objects down to the table. It cannot tell who is accountable for a table unless you provide an owners file.

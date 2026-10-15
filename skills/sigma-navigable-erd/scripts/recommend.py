@@ -11,6 +11,9 @@ Detectors (all heuristic; each recommendation says what to verify):
   dead-column   hidden calculated columns that nothing references
 """
 import collections, itertools, re
+import types
+
+import perf
 
 NOOWNER = "Warehouse table (owner not set)"
 LOOKUP = re.compile(r"^\s*Lookup\(\s*(\[[^\]]+\])\s*,\s*(\[[^\]]+\](?:\s*,\s*\[[^\]]+\])*)\s*\)\s*$", re.I | re.S)
@@ -48,7 +51,7 @@ def recommend(d):
 
     def ename(ek):
         m = elem_meta.get(ek, {})
-        name = m.get("name", ek)
+        name = re.sub(r"\s+", " ", m.get("name", ek).replace("\xa0", " ")).strip()
         if name.startswith("(untitled)"):
             first = (elem_src.get(ek) or [{}])[0].get("label")
             name = f"{first} table ({ek.split('|')[-1]})" if first else name
@@ -128,12 +131,13 @@ def recommend(d):
                 seen.add(w); out.append(w)
         return out
 
-    def add(type_, sev, title, detail, action, nodes, saves, where=(), extra_owners=(), roles=None):
+    def add(type_, sev, title, detail, action, nodes, saves, where=(), extra_owners=(), roles=None,
+            verdict=None, confidence=None, evidence="", verify="", impact=None):
         nodes = list(dict.fromkeys(nodes))[:16]
-        recs.append({"id": f"r{len(recs)+1}", "type": type_, "sev": sev, "title": title, "detail": detail,
+        recs.append({"verdict": verdict, "confidence": confidence, "evidence": evidence, "verify": verify, "impact": impact, **{"id": f"r{len(recs)+1}", "type": type_, "sev": sev, "title": title, "detail": detail,
                      "action": action, "nodes": nodes, "owners": owners_of(nodes, extra_owners),
                      "where": list(dict.fromkeys(where))[:6], "saves": saves,
-                     "roles": {k: v for k, v in (roles or {}).items() if k in nodes}})
+                     "roles": {k: v for k, v in (roles or {}).items() if k in nodes}}})
 
     # ---- 1. redundant lookup ---------------------------------------------
     lookups = []   # (key, node, srcLabel, valName, keyRefs)
@@ -356,10 +360,16 @@ def recommend(d):
             "Delete them. First check they are not used by an action, a saved view, or something outside this workbook.",
             ks, f"{len(ks)} column{'s' if len(ks) > 1 else ''}", [ename_ + " / " + oname], roles={k: "Unused: safe to delete after checking" for k in ks})
 
+    # ---- performance opinions: measured from the generated SQL where it is available, inferred from formulas otherwise
+    ctx = types.SimpleNamespace(g=g, by_elem=by_elem, col_nodes=col_nodes, add=add, ename=ename, ek_of=ek_of, ancestors=ancestors)
+    perf.add_perf_recs(d, ctx)
+    perf.annotate(d, recs, ctx)
+
     order = {"high": 0, "med": 1, "low": 2}
     recs.sort(key=lambda r: (order[r["sev"]], r["type"]))
     for i, r in enumerate(recs):
         r["id"] = f"r{i+1}"
+    d["perf"] = perf.summarize(d, recs)
     return recs
 
 
